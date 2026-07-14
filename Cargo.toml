@@ -1,0 +1,10 @@
+[package]
+name = "pi-auto-feeder"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+axum = "0.8.9"
+color-eyre = "0.6.5"
+leptos = { version = "0.8.20", features = ["ssr"] }
+tokio = { version = "1.52.3", features = ["full"] }
