@@ -14,10 +14,14 @@ use tokio::net::TcpListener;
 async fn main() -> color_eyre::Result<()> {
     color_eyre::install()?;
 
+    let feeder = feed::Feeder::from_env()?;
+    println!("Feeder mode: {}", feeder.mode());
+
     let app = Router::new()
         .route("/", get(index))
         .route("/feed", post(api::feed_from_web))
-        .route("/api/feed", post(api::feed));
+        .route("/api/feed", post(api::feed))
+        .with_state(feeder);
     let address = SocketAddr::from(([0, 0, 0, 0], 3000));
     let listener = TcpListener::bind(address).await?;
 

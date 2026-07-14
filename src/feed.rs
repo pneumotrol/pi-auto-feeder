@@ -1,5 +1,9 @@
+use color_eyre::eyre::{Result, WrapErr};
 use rppal::pwm::{Channel, Polarity, Pwm};
-use std::time::Duration;
+use std::{
+    env::{self, VarError},
+    time::Duration,
+};
 use tokio::sync::Mutex;
 
 const PWM_PERIOD: Duration = Duration::from_millis(20);
@@ -12,7 +16,40 @@ const POSITION_HOLD_TIME: Duration = Duration::from_secs(1);
 
 static FEED_LOCK: Mutex<()> = Mutex::const_new(());
 
-pub async fn feed() -> rppal::pwm::Result<()> {
+#[derive(Clone)]
+pub struct Feeder {
+    mock: bool,
+}
+
+impl Feeder {
+    pub fn from_env() -> Result<Self> {
+        let mock = match env::var("FEEDER_MOCK") {
+            Ok(value) => value
+                .parse::<bool>()
+                .wrap_err("FEEDER_MOCK must be true or false")?,
+            Err(VarError::NotPresent) => false,
+            Err(error) => return Err(error).wrap_err("FEEDER_MOCK is not valid Unicode"),
+        };
+
+        Ok(Self { mock })
+    }
+
+    pub fn mode(&self) -> &'static str {
+        if self.mock { "mock" } else { "hardware" }
+    }
+
+    pub async fn feed(&self) -> Result<()> {
+        if self.mock {
+            println!("Feed requested (mock)");
+            return Ok(());
+        }
+
+        feed_with_hardware_pwm().await?;
+        Ok(())
+    }
+}
+
+async fn feed_with_hardware_pwm() -> rppal::pwm::Result<()> {
     let _guard = FEED_LOCK.lock().await;
 
     // Raspberry Pi 4B maps PWM0 to BCM GPIO12 or GPIO18, and PWM1 to GPIO13 or GPIO19.
