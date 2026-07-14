@@ -7,4 +7,5 @@ edition = "2024"
 axum = "0.8.9"
 color-eyre = "0.6.5"
 leptos = { version = "0.8.20", features = ["ssr"] }
+rppal = "0.22.1"
 tokio = { version = "1.52.3", features = ["full"] }
