@@ -1,6 +1,8 @@
 mod api;
+mod camera;
 mod feed;
 
+use crate::{camera::Camera, feed::Feeder};
 use axum::{
     Router,
     response::Html,
@@ -14,14 +16,24 @@ use tokio::net::TcpListener;
 async fn main() -> color_eyre::Result<()> {
     color_eyre::install()?;
 
-    let feeder = feed::Feeder::from_env()?;
+    let feeder = Feeder::from_env()?;
+    let camera = Camera::from_env()?;
     println!("Feeder mode: {}", feeder.mode());
+    println!("Camera mode: {}", camera.mode());
 
     let app = Router::new()
         .route("/", get(index))
-        .route("/feed", post(api::feed_from_web))
-        .route("/api/feed", post(api::feed))
-        .with_state(feeder);
+        .merge(
+            Router::new()
+                .route("/feed", post(api::feed_from_web))
+                .route("/api/feed", post(api::feed))
+                .with_state(feeder),
+        )
+        .merge(
+            Router::new()
+                .route("/camera/stream", get(camera::stream))
+                .with_state(camera),
+        );
     let address = SocketAddr::from(([0, 0, 0, 0], 3000));
     let listener = TcpListener::bind(address).await?;
 
@@ -47,6 +59,10 @@ fn App() -> impl IntoView {
             <body>
                 <main>
                     <h1>"Pi Auto Feeder"</h1>
+                    <section>
+                        <h2>"カメラ"</h2>
+                        <img src="/camera/stream" alt="給餌器のカメラ映像" />
+                    </section>
                     <form method="post" action="/feed">
                         <button type="submit">"給餌する"</button>
                     </form>
