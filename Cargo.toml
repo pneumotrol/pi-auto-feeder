@@ -3,11 +3,43 @@ name = "pi-auto-feeder"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "pi-auto-feeder"
+path = "src/main.rs"
+required-features = ["ssr"]
+
+[features]
+default = ["ssr"]
+ssr = [
+    "dep:axum",
+    "dep:color-eyre",
+    "dep:futures-util",
+    "dep:rppal",
+    "dep:serde",
+    "dep:serde_json",
+    "dep:sqlx",
+    "dep:tokio",
+    "dep:tokio-util",
+    "dep:tower-http",
+    "leptos/ssr",
+]
+hydrate = ["dep:gloo-net", "dep:serde", "dep:serde_json", "dep:wasm-bindgen", "dep:web-sys", "leptos/hydrate"]
+
 [dependencies]
-axum = "0.8.9"
-color-eyre = "0.6.5"
-futures-util = "0.3.32"
-leptos = { version = "0.8.20", features = ["ssr"] }
-rppal = "0.22.1"
-tokio = { version = "1.52.3", features = ["full"] }
-tokio-util = { version = "0.7.18", features = ["io"] }
+axum = { version = "0.8.9", optional = true }
+color-eyre = { version = "0.6.5", optional = true }
+futures-util = { version = "0.3.32", optional = true }
+gloo-net = { version = "0.6.0", optional = true }
+leptos = { version = "0.8.20", default-features = false }
+rppal = { version = "0.22.1", optional = true }
+serde = { version = "1.0.228", features = ["derive"], optional = true }
+serde_json = { version = "1.0.150", optional = true }
+sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio", "sqlite"], optional = true }
+tokio = { version = "1.52.3", features = ["full"], optional = true }
+tokio-util = { version = "0.7.18", features = ["io"], optional = true }
+tower-http = { version = "0.6.8", features = ["fs"], optional = true }
+wasm-bindgen = { version = "0.2.116", optional = true }
+web-sys = { version = "0.3.103", features = ["Document", "Element", "EventSource", "Window"], optional = true }

@@ -1,8 +1,10 @@
 use axum::{
+    Router,
     body::Body,
     extract::State,
     http::{StatusCode, header},
     response::{IntoResponse, Response},
+    routing::get,
 };
 use color_eyre::eyre::{Result, WrapErr, eyre};
 use futures_util::{StreamExt, stream};
@@ -95,7 +97,13 @@ impl Camera {
     }
 }
 
-pub async fn stream(State(camera): State<Camera>) -> Result<Response, StatusCode> {
+pub fn router(camera: Camera) -> Router {
+    Router::new()
+        .route("/camera/stream", get(stream))
+        .with_state(camera)
+}
+
+async fn stream(State(camera): State<Camera>) -> Result<Response, StatusCode> {
     camera.response().await.map_err(|error| {
         eprintln!("Failed to stream camera: {error}");
         StatusCode::INTERNAL_SERVER_ERROR

@@ -1,7 +1,9 @@
+use crate::schedule::ScheduleStore;
 use color_eyre::eyre::{Result, WrapErr};
 use rppal::pwm::{Channel, Polarity, Pwm};
 use std::{
     env::{self, VarError},
+    sync::Arc,
     time::Duration,
 };
 use tokio::sync::Mutex;
@@ -12,13 +14,45 @@ const MAX_PULSE_WIDTH_MICROS: u64 = 2_500;
 const MAX_ANGLE_DEGREES: u64 = 180;
 const IDLE_ANGLE_DEGREES: u64 = 0;
 const FEED_ANGLE_DEGREES: u64 = 90;
-const POSITION_HOLD_TIME: Duration = Duration::from_secs(1);
-
-static FEED_LOCK: Mutex<()> = Mutex::const_new(());
+const POSITION_SETTLE_TIME: Duration = Duration::from_secs(1);
 
 #[derive(Clone)]
 pub struct Feeder {
     mock: bool,
+}
+
+#[derive(Clone)]
+pub struct FeedService {
+    feeder: Feeder,
+    store: ScheduleStore,
+    lock: Arc<Mutex<()>>,
+}
+
+pub enum FeedOutcome {
+    Fed(String),
+    Cooldown(u64),
+}
+
+impl FeedService {
+    pub fn new(feeder: Feeder, store: ScheduleStore) -> Self {
+        Self {
+            feeder,
+            store,
+            lock: Arc::new(Mutex::new(())),
+        }
+    }
+
+    pub async fn feed(&self) -> Result<FeedOutcome> {
+        let _guard = self.lock.lock().await;
+        let remaining = self.store.cooldown_remaining().await?;
+        if remaining > 0 {
+            return Ok(FeedOutcome::Cooldown(remaining));
+        }
+        let settings = self.store.settings().await?;
+        self.feeder.feed(settings.feed_duration_ms).await?;
+        let fed_at = self.store.record_feed().await?;
+        Ok(FeedOutcome::Fed(fed_at))
+    }
 }
 
 impl Feeder {
@@ -38,20 +72,18 @@ impl Feeder {
         if self.mock { "mock" } else { "hardware" }
     }
 
-    pub async fn feed(&self) -> Result<()> {
+    async fn feed(&self, duration_ms: u64) -> Result<()> {
         if self.mock {
-            println!("Feed requested (mock)");
+            println!("Feed requested for {duration_ms} ms (mock)");
             return Ok(());
         }
 
-        feed_with_hardware_pwm().await?;
+        feed_with_hardware_pwm(Duration::from_millis(duration_ms)).await?;
         Ok(())
     }
 }
 
-async fn feed_with_hardware_pwm() -> rppal::pwm::Result<()> {
-    let _guard = FEED_LOCK.lock().await;
-
+async fn feed_with_hardware_pwm(feed_duration: Duration) -> rppal::pwm::Result<()> {
     // Raspberry Pi 4B maps PWM0 to BCM GPIO12 or GPIO18, and PWM1 to GPIO13 or GPIO19.
     // This application uses PWM0 on BCM GPIO18 (physical pin 12).
     let pwm = Pwm::with_period(
@@ -62,11 +94,11 @@ async fn feed_with_hardware_pwm() -> rppal::pwm::Result<()> {
         true,
     )?;
 
-    tokio::time::sleep(POSITION_HOLD_TIME).await;
+    tokio::time::sleep(POSITION_SETTLE_TIME).await;
     pwm.set_pulse_width(pulse_width(FEED_ANGLE_DEGREES))?;
-    tokio::time::sleep(POSITION_HOLD_TIME).await;
+    tokio::time::sleep(feed_duration).await;
     pwm.set_pulse_width(pulse_width(IDLE_ANGLE_DEGREES))?;
-    tokio::time::sleep(POSITION_HOLD_TIME).await;
+    tokio::time::sleep(POSITION_SETTLE_TIME).await;
 
     Ok(())
 }
