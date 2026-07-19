@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT CASE WHEN feeder_status.last_feed_at IS NULL THEN 0 ELSE MAX(\n                0,\n                settings.cooldown_seconds\n                - (strftime('%s', 'now', 'localtime') - strftime('%s', feeder_status.last_feed_at))\n             ) END AS remaining\n             FROM feeder_status CROSS JOIN settings\n             WHERE feeder_status.id = 1 AND settings.id = 1",
+  "describe": {
+    "columns": [
+      {
+        "name": "remaining",
+        "ordinal": 0,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "17c760bbb1fa5d1f85c1e0a5df6fafc94fe89b1c5a9cca21d1a87fe091bd7cb4"
+}

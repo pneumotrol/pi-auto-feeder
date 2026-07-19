@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT strftime('%Y-%m-%d %H:%M:%S', 'now', 'localtime') AS `current_time!: String`,\n                    last_feed_at\n             FROM feeder_status\n             WHERE id = 1",
+  "describe": {
+    "columns": [
+      {
+        "name": "current_time!: String",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "last_feed_at",
+        "ordinal": 1,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      true,
+      true
+    ]
+  },
+  "hash": "7f0c3777c1f1c0e95bdd48f5e93e093f31e9e7a5ef62bd3cf0c73bf3d237ad3a"
+}

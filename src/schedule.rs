@@ -1,6 +1,7 @@
 use crate::feed::{FeedOutcome, FeedService};
+use chrono::NaiveDateTime;
 use color_eyre::eyre::{Result, WrapErr};
-use sqlx::{Row, SqlitePool, sqlite::SqliteConnectOptions};
+use sqlx::{Executor, SqlitePool, sqlite::SqliteConnectOptions};
 use std::{env, str::FromStr, time::Duration};
 use tokio::sync::broadcast;
 
@@ -59,121 +60,122 @@ impl ScheduleStore {
     }
 
     async fn initialize(&self) -> Result<()> {
-        sqlx::query(
-            "CREATE TABLE IF NOT EXISTS schedules (
+        self.pool
+            .execute(
+                "CREATE TABLE IF NOT EXISTS schedules (
                 id INTEGER PRIMARY KEY,
                 scheduled_at TEXT UNIQUE,
                 legacy_time TEXT,
                 failure_reason TEXT
             )",
-        )
-        .execute(&self.pool)
-        .await?;
+            )
+            .await?;
         self.migrate_time_only_schedules().await?;
         self.add_failure_reason_column().await?;
-        sqlx::query(
-            "CREATE TABLE IF NOT EXISTS feeder_status (
+        self.pool
+            .execute(
+                "CREATE TABLE IF NOT EXISTS feeder_status (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
                 last_feed_at TEXT
             )",
-        )
-        .execute(&self.pool)
-        .await?;
-        sqlx::query("INSERT OR IGNORE INTO feeder_status (id) VALUES (1)")
+            )
+            .await?;
+        sqlx::query!("INSERT OR IGNORE INTO feeder_status (id) VALUES (1)")
             .execute(&self.pool)
             .await?;
-        sqlx::query(
-            "CREATE TABLE IF NOT EXISTS feed_history (
+        self.pool
+            .execute(
+                "CREATE TABLE IF NOT EXISTS feed_history (
                 id INTEGER PRIMARY KEY,
                 fed_at TEXT NOT NULL
             )",
-        )
-        .execute(&self.pool)
-        .await?;
-        sqlx::query(
-            "CREATE TABLE IF NOT EXISTS settings (
+            )
+            .await?;
+        self.pool
+            .execute(
+                "CREATE TABLE IF NOT EXISTS settings (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
                 cooldown_seconds INTEGER NOT NULL,
                 feed_duration_ms INTEGER NOT NULL
             )",
-        )
-        .execute(&self.pool)
-        .await?;
-        sqlx::query(
+            )
+            .await?;
+        sqlx::query!(
             "INSERT OR IGNORE INTO settings (id, cooldown_seconds, feed_duration_ms)
              VALUES (1, ?1, ?2)",
+            DEFAULT_COOLDOWN_SECONDS as i64,
+            DEFAULT_FEED_DURATION_MS as i64,
         )
-        .bind(DEFAULT_COOLDOWN_SECONDS as i64)
-        .bind(DEFAULT_FEED_DURATION_MS as i64)
         .execute(&self.pool)
         .await?;
         Ok(())
     }
 
     async fn add_failure_reason_column(&self) -> Result<()> {
-        let columns = sqlx::query("PRAGMA table_info(schedules)")
-            .fetch_all(&self.pool)
-            .await?;
-        if !columns
-            .iter()
-            .any(|column| column.get::<String, _>("name") == "failure_reason")
-        {
-            sqlx::query("ALTER TABLE schedules ADD COLUMN failure_reason TEXT")
-                .execute(&self.pool)
+        let schema = sqlx::query_scalar!(
+            "SELECT sql AS `sql!: String`
+             FROM sqlite_master
+             WHERE type = 'table' AND name = 'schedules'"
+        )
+        .fetch_one(&self.pool)
+        .await?;
+        if !schema.contains("failure_reason") {
+            self.pool
+                .execute("ALTER TABLE schedules ADD COLUMN failure_reason TEXT")
                 .await?;
         }
         Ok(())
     }
 
     async fn migrate_time_only_schedules(&self) -> Result<()> {
-        let columns = sqlx::query("PRAGMA table_info(schedules)")
-            .fetch_all(&self.pool)
-            .await?;
-        let has_scheduled_at = columns
-            .iter()
-            .any(|column| column.get::<String, _>("name") == "scheduled_at");
-        let has_legacy_time = columns
-            .iter()
-            .any(|column| column.get::<String, _>("name") == "legacy_time");
+        let schema = sqlx::query_scalar!(
+            "SELECT sql AS `sql!: String`
+             FROM sqlite_master
+             WHERE type = 'table' AND name = 'schedules'"
+        )
+        .fetch_one(&self.pool)
+        .await?;
+        let has_scheduled_at = schema.contains("scheduled_at");
+        let has_legacy_time = schema.contains("legacy_time");
         if has_scheduled_at && has_legacy_time {
             return Ok(());
         }
         if has_scheduled_at {
-            sqlx::query("ALTER TABLE schedules ADD COLUMN legacy_time TEXT")
-                .execute(&self.pool)
+            self.pool
+                .execute("ALTER TABLE schedules ADD COLUMN legacy_time TEXT")
                 .await?;
             return Ok(());
         }
 
         let mut transaction = self.pool.begin().await?;
-        sqlx::query("ALTER TABLE schedules RENAME TO schedules_time_only")
-            .execute(&mut *transaction)
+        transaction
+            .execute("ALTER TABLE schedules RENAME TO schedules_time_only")
             .await?;
-        sqlx::query(
-            "CREATE TABLE schedules (
+        transaction
+            .execute(
+                "CREATE TABLE schedules (
                 id INTEGER PRIMARY KEY,
                 scheduled_at TEXT UNIQUE,
                 legacy_time TEXT,
                 failure_reason TEXT
             )",
-        )
-        .execute(&mut *transaction)
-        .await?;
-        sqlx::query(
-            "INSERT INTO schedules (id, scheduled_at, legacy_time)
+            )
+            .await?;
+        transaction
+            .execute(
+                "INSERT INTO schedules (id, scheduled_at, legacy_time)
              SELECT id, NULL, time FROM schedules_time_only",
-        )
-        .execute(&mut *transaction)
-        .await?;
-        sqlx::query("DROP TABLE schedules_time_only")
-            .execute(&mut *transaction)
+            )
+            .await?;
+        transaction
+            .execute("DROP TABLE schedules_time_only")
             .await?;
         transaction.commit().await?;
         Ok(())
     }
 
     pub async fn list(&self) -> Result<Vec<Schedule>> {
-        let rows = sqlx::query(
+        let rows = sqlx::query!(
             "SELECT id,
                     scheduled_at,
                     legacy_time,
@@ -181,7 +183,7 @@ impl ScheduleStore {
                     COALESCE(
                         scheduled_at < strftime('%Y-%m-%dT%H:%M', 'now', 'localtime'),
                         0
-                    ) AS missed
+                    ) AS `missed!: bool`
              FROM schedules
              ORDER BY scheduled_at IS NOT NULL, scheduled_at",
         )
@@ -189,33 +191,31 @@ impl ScheduleStore {
         .await?;
         let schedules = rows
             .into_iter()
-            .map(|row| -> sqlx::Result<Schedule> {
-                Ok(Schedule {
-                    id: row.try_get("id")?,
-                    scheduled_at: row.try_get("scheduled_at")?,
-                    legacy_time: row.try_get("legacy_time")?,
-                    missed: row.try_get::<i64, _>("missed")? != 0,
-                    failure_reason: row.try_get("failure_reason")?,
-                })
+            .map(|row| Schedule {
+                id: row.id,
+                scheduled_at: row.scheduled_at,
+                legacy_time: row.legacy_time,
+                missed: row.missed,
+                failure_reason: row.failure_reason,
             })
-            .collect::<sqlx::Result<Vec<_>>>()?;
+            .collect();
         Ok(schedules)
     }
 
     pub async fn add(&self, scheduled_at: &str) -> Result<Schedule> {
         validate_scheduled_at(scheduled_at)?;
-        let row = sqlx::query(
+        let row = sqlx::query!(
             "INSERT INTO schedules (scheduled_at)
              SELECT ?1
              WHERE ?1 > strftime('%Y-%m-%dT%H:%M', 'now', 'localtime')
              RETURNING id, scheduled_at",
+            scheduled_at,
         )
-        .bind(scheduled_at)
         .fetch_one(&self.pool)
         .await?;
         let schedule = Schedule {
-            id: row.try_get("id")?,
-            scheduled_at: row.try_get("scheduled_at")?,
+            id: row.id,
+            scheduled_at: row.scheduled_at,
             legacy_time: None,
             missed: false,
             failure_reason: None,
@@ -225,8 +225,7 @@ impl ScheduleStore {
     }
 
     pub async fn delete(&self, id: i64) -> Result<()> {
-        sqlx::query("DELETE FROM schedules WHERE id = ?1")
-            .bind(id)
+        sqlx::query!("DELETE FROM schedules WHERE id = ?1", id)
             .execute(&self.pool)
             .await?;
         self.notify();
@@ -235,44 +234,41 @@ impl ScheduleStore {
 
     pub async fn record_feed(&self) -> Result<String> {
         let mut transaction = self.pool.begin().await?;
-        sqlx::query(
+        sqlx::query!(
             "UPDATE feeder_status
              SET last_feed_at = strftime('%Y-%m-%d %H:%M:%S', 'now', 'localtime')
              WHERE id = 1",
         )
         .execute(&mut *transaction)
         .await?;
-        let row = sqlx::query(
+        let row = sqlx::query!(
             "INSERT INTO feed_history (fed_at)
              VALUES (strftime('%Y-%m-%d %H:%M:%S', 'now', 'localtime'))
              RETURNING fed_at",
         )
         .fetch_one(&mut *transaction)
         .await?;
-        let fed_at = row.try_get("fed_at")?;
+        let fed_at = row.fed_at;
         transaction.commit().await?;
         self.notify();
         Ok(fed_at)
     }
 
     pub async fn recent_feed_history(&self) -> Result<Vec<String>> {
-        let rows = sqlx::query("SELECT fed_at FROM feed_history ORDER BY id DESC LIMIT 10")
+        let rows = sqlx::query!("SELECT fed_at FROM feed_history ORDER BY id DESC LIMIT 10")
             .fetch_all(&self.pool)
             .await?;
-        Ok(rows
-            .into_iter()
-            .map(|row| row.try_get("fed_at"))
-            .collect::<sqlx::Result<Vec<_>>>()?)
+        Ok(rows.into_iter().map(|row| row.fed_at).collect())
     }
 
     pub async fn settings(&self) -> Result<Settings> {
         let row =
-            sqlx::query("SELECT cooldown_seconds, feed_duration_ms FROM settings WHERE id = 1")
+            sqlx::query!("SELECT cooldown_seconds, feed_duration_ms FROM settings WHERE id = 1")
                 .fetch_one(&self.pool)
                 .await?;
         Ok(Settings {
-            cooldown_seconds: row.try_get::<i64, _>("cooldown_seconds")? as u64,
-            feed_duration_ms: row.try_get::<i64, _>("feed_duration_ms")? as u64,
+            cooldown_seconds: row.cooldown_seconds as u64,
+            feed_duration_ms: row.feed_duration_ms as u64,
         })
     }
 
@@ -282,11 +278,13 @@ impl ScheduleStore {
         {
             color_eyre::eyre::bail!("settings are outside the allowed range");
         }
-        sqlx::query(
+        let cooldown_seconds = settings.cooldown_seconds as i64;
+        let feed_duration_ms = settings.feed_duration_ms as i64;
+        sqlx::query!(
             "UPDATE settings SET cooldown_seconds = ?1, feed_duration_ms = ?2 WHERE id = 1",
+            cooldown_seconds,
+            feed_duration_ms,
         )
-        .bind(settings.cooldown_seconds as i64)
-        .bind(settings.feed_duration_ms as i64)
         .execute(&self.pool)
         .await?;
         self.notify();
@@ -294,7 +292,7 @@ impl ScheduleStore {
     }
 
     pub async fn cooldown_remaining(&self) -> Result<u64> {
-        let row = sqlx::query(
+        let row = sqlx::query!(
             "SELECT CASE WHEN feeder_status.last_feed_at IS NULL THEN 0 ELSE MAX(
                 0,
                 settings.cooldown_seconds
@@ -305,7 +303,7 @@ impl ScheduleStore {
         )
         .fetch_one(&self.pool)
         .await?;
-        Ok(row.try_get::<i64, _>("remaining")? as u64)
+        Ok(row.remaining as u64)
     }
 
     pub fn subscribe(&self) -> broadcast::Receiver<()> {
@@ -317,8 +315,8 @@ impl ScheduleStore {
     }
 
     pub async fn status(&self) -> Result<ServerStatus> {
-        let row = sqlx::query(
-            "SELECT strftime('%Y-%m-%d %H:%M:%S', 'now', 'localtime') AS current_time,
+        let row = sqlx::query!(
+            "SELECT strftime('%Y-%m-%d %H:%M:%S', 'now', 'localtime') AS `current_time!: String`,
                     last_feed_at
              FROM feeder_status
              WHERE id = 1",
@@ -326,14 +324,14 @@ impl ScheduleStore {
         .fetch_one(&self.pool)
         .await?;
         Ok(ServerStatus {
-            current_time: row.try_get("current_time")?,
-            last_feed_time: row.try_get("last_feed_at")?,
+            current_time: row.current_time,
+            last_feed_time: row.last_feed_at,
         })
     }
 
     async fn due_schedule(&self) -> Result<Option<Schedule>> {
-        let row = sqlx::query(
-            "SELECT id, scheduled_at FROM schedules
+        let row = sqlx::query!(
+            "SELECT id AS `id!: i64`, scheduled_at FROM schedules
              WHERE scheduled_at = strftime('%Y-%m-%dT%H:%M', 'now', 'localtime')
                AND failure_reason IS NULL
              ORDER BY id
@@ -342,23 +340,18 @@ impl ScheduleStore {
         .fetch_optional(&self.pool)
         .await?;
 
-        let schedule = row
-            .map(|row| -> sqlx::Result<Schedule> {
-                Ok(Schedule {
-                    id: row.try_get("id")?,
-                    scheduled_at: row.try_get("scheduled_at")?,
-                    legacy_time: None,
-                    missed: false,
-                    failure_reason: None,
-                })
-            })
-            .transpose()?;
+        let schedule = row.map(|row| Schedule {
+            id: row.id,
+            scheduled_at: row.scheduled_at,
+            legacy_time: None,
+            missed: false,
+            failure_reason: None,
+        });
         Ok(schedule)
     }
 
     async fn complete_scheduled_feed(&self, id: i64) -> Result<()> {
-        sqlx::query("DELETE FROM schedules WHERE id = ?1")
-            .bind(id)
+        sqlx::query!("DELETE FROM schedules WHERE id = ?1", id)
             .execute(&self.pool)
             .await?;
         self.notify();
@@ -366,11 +359,13 @@ impl ScheduleStore {
     }
 
     async fn fail_schedule(&self, id: i64, reason: &str) -> Result<()> {
-        sqlx::query("UPDATE schedules SET failure_reason = ?1 WHERE id = ?2")
-            .bind(reason)
-            .bind(id)
-            .execute(&self.pool)
-            .await?;
+        sqlx::query!(
+            "UPDATE schedules SET failure_reason = ?1 WHERE id = ?2",
+            reason,
+            id,
+        )
+        .execute(&self.pool)
+        .await?;
         self.notify();
         Ok(())
     }
@@ -422,37 +417,15 @@ pub fn start_scheduler(store: ScheduleStore, feeder: FeedService) {
 }
 
 fn validate_scheduled_at(value: &str) -> Result<()> {
-    if !value.is_ascii()
-        || value.len() != 16
-        || &value[4..5] != "-"
-        || &value[7..8] != "-"
-        || &value[10..11] != "T"
-        || &value[13..14] != ":"
-    {
-        color_eyre::eyre::bail!("schedule must use YYYY-MM-DDTHH:MM format");
-    }
-    let year = value[0..4].parse::<u16>()?;
-    let month = value[5..7].parse::<u8>()?;
-    let day = value[8..10].parse::<u8>()?;
-    let hour = value[11..13].parse::<u8>()?;
-    let minute = value[14..16].parse::<u8>()?;
-    let leap_year = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
-    let days_in_month = match month {
-        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
-        4 | 6 | 9 | 11 => 30,
-        2 if leap_year => 29,
-        2 => 28,
-        _ => 0,
-    };
-    if day == 0 || day > days_in_month || hour > 23 || minute > 59 {
-        color_eyre::eyre::bail!("schedule must contain a valid date and time");
-    }
+    NaiveDateTime::parse_from_str(value, "%Y-%m-%dT%H:%M")
+        .wrap_err("schedule must contain a valid date and time in YYYY-MM-DDTHH:MM format")?;
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sqlx::Executor;
 
     #[test]
     fn validates_scheduled_at() {
@@ -473,18 +446,16 @@ mod tests {
             .unwrap()
             .create_if_missing(true);
         let pool = SqlitePool::connect_with(options).await.unwrap();
-        sqlx::query(
+        pool.execute(
             "CREATE TABLE schedules (
                 id INTEGER PRIMARY KEY,
                 time TEXT NOT NULL UNIQUE,
                 last_run_date TEXT
             )",
         )
-        .execute(&pool)
         .await
         .unwrap();
-        sqlx::query("INSERT INTO schedules (id, time) VALUES (42, '07:30')")
-            .execute(&pool)
+        pool.execute("INSERT INTO schedules (id, time) VALUES (42, '07:30')")
             .await
             .unwrap();
         pool.close().await;

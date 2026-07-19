@@ -15,6 +15,7 @@ required-features = ["ssr"]
 default = ["ssr"]
 ssr = [
     "dep:axum",
+    "dep:chrono",
     "dep:color-eyre",
     "dep:futures-util",
     "dep:rppal",
@@ -38,6 +39,7 @@ hydrate = [
 
 [dependencies]
 axum = { version = "0.8.9", optional = true }
+chrono = { version = "0.4.42", default-features = false, features = ["std"], optional = true }
 color-eyre = { version = "0.6.5", optional = true }
 console_error_panic_hook = { version = "0.1.7", optional = true }
 futures-util = { version = "0.3.32", optional = true }
@@ -48,7 +50,7 @@ leptos_meta = { version = "0.8.0" }
 leptos_router = { version = "0.8.0" }
 rppal = { version = "0.22.1", optional = true }
 serde = { version = "1.0.228", features = ["derive"], optional = true }
-sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio", "sqlite"], optional = true }
+sqlx = { version = "0.8.6", default-features = false, features = ["macros", "runtime-tokio", "sqlite"], optional = true }
 tokio = { version = "1.52.3", features = ["full"], optional = true }
 tokio-util = { version = "0.7.18", features = ["io"], optional = true }
 wasm-bindgen = { version = "0.2.116", optional = true }

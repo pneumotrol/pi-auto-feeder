@@ -1,0 +1,44 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT id,\n                    scheduled_at,\n                    legacy_time,\n                    failure_reason,\n                    COALESCE(\n                        scheduled_at < strftime('%Y-%m-%dT%H:%M', 'now', 'localtime'),\n                        0\n                    ) AS `missed!: bool`\n             FROM schedules\n             ORDER BY scheduled_at IS NOT NULL, scheduled_at",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "scheduled_at",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "legacy_time",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "failure_reason",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "missed!: bool",
+        "ordinal": 4,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "c6a5a268492dbc0e9afab654c115f0f72f8b12c66775bb937b913b8705a9750b"
+}

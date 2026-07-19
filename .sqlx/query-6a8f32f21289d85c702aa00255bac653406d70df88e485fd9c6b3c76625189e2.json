@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO schedules (scheduled_at)\n             SELECT ?1\n             WHERE ?1 > strftime('%Y-%m-%dT%H:%M', 'now', 'localtime')\n             RETURNING id, scheduled_at",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "scheduled_at",
+        "ordinal": 1,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      true
+    ]
+  },
+  "hash": "6a8f32f21289d85c702aa00255bac653406d70df88e485fd9c6b3c76625189e2"
+}

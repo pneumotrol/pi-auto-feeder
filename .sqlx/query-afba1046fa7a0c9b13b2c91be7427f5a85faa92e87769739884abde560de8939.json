@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT fed_at FROM feed_history ORDER BY id DESC LIMIT 10",
+  "describe": {
+    "columns": [
+      {
+        "name": "fed_at",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "afba1046fa7a0c9b13b2c91be7427f5a85faa92e87769739884abde560de8939"
+}

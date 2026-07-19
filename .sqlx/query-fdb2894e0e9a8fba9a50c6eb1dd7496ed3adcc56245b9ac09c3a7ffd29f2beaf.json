@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT cooldown_seconds, feed_duration_ms FROM settings WHERE id = 1",
+  "describe": {
+    "columns": [
+      {
+        "name": "cooldown_seconds",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "feed_duration_ms",
+        "ordinal": 1,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "fdb2894e0e9a8fba9a50c6eb1dd7496ed3adcc56245b9ac09c3a7ffd29f2beaf"
+}

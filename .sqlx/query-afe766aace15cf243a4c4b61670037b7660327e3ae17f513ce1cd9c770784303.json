@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE feeder_status\n             SET last_feed_at = strftime('%Y-%m-%d %H:%M:%S', 'now', 'localtime')\n             WHERE id = 1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "afe766aace15cf243a4c4b61670037b7660327e3ae17f513ce1cd9c770784303"
+}

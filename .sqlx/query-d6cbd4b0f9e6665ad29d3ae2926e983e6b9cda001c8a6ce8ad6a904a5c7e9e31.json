@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT OR IGNORE INTO settings (id, cooldown_seconds, feed_duration_ms)\n             VALUES (1, ?1, ?2)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "d6cbd4b0f9e6665ad29d3ae2926e983e6b9cda001c8a6ce8ad6a904a5c7e9e31"
+}

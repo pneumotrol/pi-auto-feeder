@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT id AS `id!: i64`, scheduled_at FROM schedules\n             WHERE scheduled_at = strftime('%Y-%m-%dT%H:%M', 'now', 'localtime')\n               AND failure_reason IS NULL\n             ORDER BY id\n             LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!: i64",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "scheduled_at",
+        "ordinal": 1,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      true,
+      true
+    ]
+  },
+  "hash": "3b7cc54cdf0cd6ab285f3f72f4abb76e8dc3d79afd5fbc4f761eae4e93600869"
+}

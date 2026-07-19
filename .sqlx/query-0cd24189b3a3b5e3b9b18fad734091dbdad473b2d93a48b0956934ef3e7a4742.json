@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO feed_history (fed_at)\n             VALUES (strftime('%Y-%m-%d %H:%M:%S', 'now', 'localtime'))\n             RETURNING fed_at",
+  "describe": {
+    "columns": [
+      {
+        "name": "fed_at",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "0cd24189b3a3b5e3b9b18fad734091dbdad473b2d93a48b0956934ef3e7a4742"
+}

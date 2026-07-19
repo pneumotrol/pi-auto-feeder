@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT sql AS `sql!: String`\n             FROM sqlite_master\n             WHERE type = 'table' AND name = 'schedules'",
+  "describe": {
+    "columns": [
+      {
+        "name": "sql!: String",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "8ff6510d73bd3df33b27946a89d70fdb7fdd72b1f6037e0784276f12055c8184"
+}

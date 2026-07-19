@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT OR IGNORE INTO feeder_status (id) VALUES (1)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "a51ec36fc288ba0bea73c3e46f2af4b11d5f6b20cec77474e23de809c4831cdb"
+}
