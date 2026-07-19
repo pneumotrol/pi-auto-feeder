@@ -51,7 +51,7 @@ sqlx = { version = "0.8.6", default-features = false, features = ["macros", "run
 tokio = { version = "1.52.3", features = ["full"], optional = true }
 tokio-util = { version = "0.7.18", features = ["io"], optional = true }
 wasm-bindgen = { version = "0.2.116", optional = true }
-web-sys = { version = "0.3.103", features = ["Document", "Element", "EventSource", "Performance", "Window"], optional = true }
+web-sys = { version = "0.3.103", features = ["Event", "EventSource", "Performance", "Window"], optional = true }
 
 [profile.wasm-release]
 inherits = "release"

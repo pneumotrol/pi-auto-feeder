@@ -2,7 +2,7 @@ use leptos::form::ActionForm;
 use leptos::prelude::*;
 use leptos_meta::{MetaTags, Stylesheet, Title, provide_meta_context};
 use leptos_router::{
-    components::{Route, Router, Routes},
+    components::{A, Route, Router, Routes},
     path,
 };
 use serde::{Deserialize, Serialize};
@@ -117,51 +117,46 @@ fn Home(
     cooldown_remaining: u64,
     feed_history: Vec<String>,
 ) -> impl IntoView {
-    let minimum_schedule = current_server_time[..16].replace(' ', "T");
-    let (schedules, set_schedules) = signal(schedules);
-    let (server_time_base, _set_server_time_base) = signal(current_server_time.clone());
-    let (current_server_time, set_current_server_time) = signal(current_server_time);
-    let (last_feed_time, _set_last_feed_time) = signal(last_feed_time);
-    let (cooldown_base, _set_cooldown_base) = signal(cooldown_remaining);
-    let (cooldown_remaining, set_cooldown_remaining) = signal(cooldown_remaining);
-    let (clock_started_at, _set_clock_started_at) = signal(performance_now());
-    let (feed_history, _set_feed_history) = signal(feed_history);
-    let (new_scheduled_at, set_new_scheduled_at) = signal(String::new());
+    let schedules = RwSignal::new(schedules);
+    #[cfg(feature = "hydrate")]
+    let server_time_base = RwSignal::new(current_server_time.clone());
+    let current_server_time = RwSignal::new(current_server_time);
+    let last_feed_time = RwSignal::new(last_feed_time);
+    #[cfg(feature = "hydrate")]
+    let cooldown_base = RwSignal::new(cooldown_remaining);
+    let cooldown_remaining = RwSignal::new(cooldown_remaining);
+    #[cfg(feature = "hydrate")]
+    let clock_started_at = RwSignal::new(0.0);
+    let feed_history = RwSignal::new(feed_history);
+    let new_scheduled_at = RwSignal::new(String::new());
     let feed = ServerAction::<FeedNow>::new();
     let delete = ServerAction::<DeleteSchedule>::new();
     let add = ServerAction::<AddSchedule>::new();
     #[cfg(feature = "hydrate")]
-    setup_live_updates(LiveStateSignals {
-        schedules: set_schedules,
-        server_time_base: _set_server_time_base,
-        current_server_time: set_current_server_time,
-        last_feed_time: _set_last_feed_time,
-        cooldown_base: _set_cooldown_base,
-        cooldown_remaining: set_cooldown_remaining,
-        clock_started_at: _set_clock_started_at,
-        feed_history: _set_feed_history,
-    });
-    setup_client_clock(
+    use_client_sync(LiveStateSignals {
+        schedules,
         server_time_base,
+        current_server_time,
+        last_feed_time,
         cooldown_base,
+        cooldown_remaining,
         clock_started_at,
-        set_current_server_time,
-        set_cooldown_remaining,
-    );
+        feed_history,
+    });
 
     Effect::new(move |_| {
         if let Some(Ok(id)) = delete.value().get() {
-            set_schedules.update(|schedules| schedules.retain(|schedule| schedule.id != id));
+            schedules.update(|schedules| schedules.retain(|schedule| schedule.id != id));
         }
     });
     Effect::new(move |_| {
         if let Some(Ok(schedule)) = add.value().get() {
-            set_schedules.update(|schedules| {
+            schedules.update(|schedules| {
                 schedules.retain(|existing| existing.id != schedule.id);
                 schedules.push(schedule);
                 schedules.sort_by(|left, right| left.scheduled_at.cmp(&right.scheduled_at));
             });
-            set_new_scheduled_at.set(String::new());
+            new_scheduled_at.set(String::new());
         }
     });
 
@@ -182,7 +177,7 @@ fn Home(
             <h1>"Pi Auto Feeder"</h1>
 
             <nav>
-                <a href="/settings">"設定"</a>
+                <A href="/settings">"設定"</A>
             </nav>
 
             <section>
@@ -199,70 +194,24 @@ fn Home(
 
             <section>
                 <h2>"給餌スケジュール"</h2>
-                {move || {
-                    let schedules = schedules.get();
-                    if schedules.is_empty() {
-                        view! { <p>"スケジュールはありません"</p> }.into_any()
-                    } else {
+                <Show
+                    when=move || schedules.with(Vec::is_empty)
+                    fallback=move || {
                         view! {
                             <ul>
-                                {schedules
-                                    .into_iter()
-                                    .map(|schedule| {
-                                        let id = schedule.id;
-                                        let scheduled_at = schedule.scheduled_at.clone();
-                                        let legacy_time = schedule.legacy_time.clone();
-                                        let failure_reason = schedule.failure_reason.clone();
-                                        let failed = schedule.missed || failure_reason.is_some();
-                                        view! {
-                                            <li>
-                                                {match scheduled_at {
-                                                    Some(scheduled_at) => {
-                                                        let label = scheduled_at.replace('T', " ");
-                                                        view! {
-                                                            <div>
-                                                                <time datetime=scheduled_at>{label}</time>
-                                                                {failed
-                                                                    .then(|| {
-                                                                        view! {
-                                                                            <p>
-                                                                                <strong>"給餌失敗"</strong>
-                                                                                {failure_reason
-                                                                                    .clone()
-                                                                                    .unwrap_or_else(|| {
-                                                                                        "予定時刻に給餌されませんでした".to_owned()
-                                                                                    })}
-                                                                            </p>
-                                                                        }
-                                                                    })}
-                                                            </div>
-                                                        }
-                                                            .into_any()
-                                                    }
-                                                    None => {
-                                                        view! {
-                                                            <p>
-                                                                <strong>"日時未設定"</strong>
-                                                                {legacy_time
-                                                                    .map(|time| { format!("（旧設定時刻 {time}）") })}
-                                                                " — 削除して再登録してください"
-                                                            </p>
-                                                        }
-                                                            .into_any()
-                                                    }
-                                                }} <ActionForm action=delete>
-                                                    <input type="hidden" name="id" value=id />
-                                                    <button type="submit">"削除"</button>
-                                                </ActionForm>
-                                            </li>
-                                        }
-                                    })
-                                    .collect_view()}
+                                <For
+                                    each=move || schedules.get()
+                                    key=|schedule| schedule.id
+                                    children=move |schedule| {
+                                        view! { <ScheduleItem schedule delete /> }
+                                    }
+                                />
                             </ul>
                         }
-                            .into_any()
                     }
-                }}
+                >
+                    <p>"スケジュールはありません"</p>
+                </Show>
 
                 <ActionForm action=add>
                     <label for="schedule-datetime">"給餌日時"</label>
@@ -271,11 +220,15 @@ fn Home(
                         name="scheduled_at"
                         type="datetime-local"
                         required
-                        min=minimum_schedule
-                        prop:value=move || new_scheduled_at.get()
-                        on:input=move |event| {
-                            set_new_scheduled_at.set(event_target_value(&event))
+                        min=move || {
+                            current_server_time
+                                .get()
+                                .get(..16)
+                                .unwrap_or_default()
+                                .replace(' ', "T")
                         }
+                        prop:value=move || new_scheduled_at.get()
+                        on:input=move |event| { new_scheduled_at.set(event_target_value(&event)) }
                     />
                     <button type="submit" disabled=move || add.pending().get()>
                         {move || if add.pending().get() { "追加中…" } else { "追加" }}
@@ -317,30 +270,80 @@ fn Home(
 
             <section>
                 <h2>"給餌履歴"</h2>
-                {move || {
-                    let history = feed_history.get();
-                    if history.is_empty() {
-                        view! { <p>"給餌履歴はありません"</p> }.into_any()
-                    } else {
+                <Show
+                    when=move || feed_history.with(Vec::is_empty)
+                    fallback=move || {
                         view! {
                             <ul>
-                                {history
-                                    .into_iter()
-                                    .map(|fed_at| {
+                                <For
+                                    each=move || feed_history.get()
+                                    key=|fed_at| fed_at.clone()
+                                    children=|fed_at| {
                                         view! {
                                             <li>
                                                 <time>{fed_at}</time>
                                             </li>
                                         }
-                                    })
-                                    .collect_view()}
+                                    }
+                                />
                             </ul>
                         }
-                            .into_any()
                     }
-                }}
+                >
+                    <p>"給餌履歴はありません"</p>
+                </Show>
             </section>
         </main>
+    }
+}
+
+#[component]
+fn ScheduleItem(schedule: ScheduleView, delete: ServerAction<DeleteSchedule>) -> impl IntoView {
+    let id = schedule.id;
+    let failed = schedule.missed || schedule.failure_reason.is_some();
+    view! {
+        <li>
+            {match schedule.scheduled_at {
+                Some(scheduled_at) => {
+                    let label = scheduled_at.replace('T', " ");
+                    view! {
+                        <div>
+                            <time datetime=scheduled_at>{label}</time>
+                            {failed
+                                .then(|| {
+                                    view! {
+                                        <p>
+                                            <strong>"給餌失敗"</strong>
+                                            {schedule
+                                                .failure_reason
+                                                .clone()
+                                                .unwrap_or_else(|| {
+                                                    "予定時刻に給餌されませんでした".to_owned()
+                                                })}
+                                        </p>
+                                    }
+                                })}
+                        </div>
+                    }
+                        .into_any()
+                }
+                None => {
+                    view! {
+                        <p>
+                            <strong>"日時未設定"</strong>
+                            {schedule
+                                .legacy_time
+                                .map(|time| format!("（旧設定時刻 {time}）"))}
+                            " — 削除して再登録してください"
+                        </p>
+                    }
+                        .into_any()
+                }
+            }} <ActionForm action=delete>
+                <input type="hidden" name="id" value=id />
+                <button type="submit">"削除"</button>
+            </ActionForm>
+        </li>
     }
 }
 
@@ -378,13 +381,13 @@ async fn load_initial_state() -> Result<InitialState, ServerFnError> {
 }
 
 #[component]
-pub fn SettingsPage(settings: SettingsView) -> impl IntoView {
+fn SettingsPage(settings: SettingsView) -> impl IntoView {
     let save = ServerAction::<SaveSettings>::new();
     view! {
         <main>
             <h1>"設定"</h1>
             <nav>
-                <a href="/">"トップへ戻る"</a>
+                <A href="/">"トップへ戻る"</A>
             </nav>
             <ActionForm action=save>
                 <label for="cooldown-seconds">"給餌のクールタイム（秒）"</label>
@@ -409,7 +412,9 @@ pub fn SettingsPage(settings: SettingsView) -> impl IntoView {
                     required
                     value=settings.feed_duration_ms
                 />
-                <button type="submit">"保存"</button>
+                <button type="submit" disabled=move || save.pending().get()>
+                    {move || if save.pending().get() { "保存中…" } else { "保存" }}
+                </button>
             </ActionForm>
             <p aria-live="polite">
                 {move || match save.value().get() {
@@ -519,85 +524,76 @@ async fn save_settings(cooldown_seconds: u64, feed_duration_ms: u64) -> Result<(
 #[cfg(feature = "hydrate")]
 #[derive(Clone, Copy)]
 struct LiveStateSignals {
-    schedules: WriteSignal<Vec<ScheduleView>>,
-    server_time_base: WriteSignal<String>,
-    current_server_time: WriteSignal<String>,
-    last_feed_time: WriteSignal<Option<String>>,
-    cooldown_base: WriteSignal<u64>,
-    cooldown_remaining: WriteSignal<u64>,
-    clock_started_at: WriteSignal<f64>,
-    feed_history: WriteSignal<Vec<String>>,
+    schedules: RwSignal<Vec<ScheduleView>>,
+    server_time_base: RwSignal<String>,
+    current_server_time: RwSignal<String>,
+    last_feed_time: RwSignal<Option<String>>,
+    cooldown_base: RwSignal<u64>,
+    cooldown_remaining: RwSignal<u64>,
+    clock_started_at: RwSignal<f64>,
+    feed_history: RwSignal<Vec<String>>,
 }
 
 #[cfg(feature = "hydrate")]
-fn setup_live_updates(signals: LiveStateSignals) {
-    use wasm_bindgen::{JsCast, closure::Closure};
-
-    let Ok(events) = web_sys::EventSource::new("/events") else {
-        return;
-    };
-    let on_message = Closure::<dyn FnMut()>::new(move || {
-        leptos::task::spawn_local(async move {
-            let Ok(state) = load_initial_state().await else {
-                return;
-            };
-            signals.schedules.set(state.schedules);
-            signals
-                .server_time_base
-                .set(state.current_server_time.clone());
-            signals.current_server_time.set(state.current_server_time);
-            signals.last_feed_time.set(state.last_feed_time);
-            signals.cooldown_base.set(state.cooldown_remaining);
-            signals.cooldown_remaining.set(state.cooldown_remaining);
-            signals.clock_started_at.set(performance_now());
-            signals.feed_history.set(state.feed_history);
-        });
-    });
-    events.set_onmessage(Some(on_message.as_ref().unchecked_ref()));
-    on_message.forget();
-    std::mem::forget(events);
-}
-
-#[cfg(feature = "hydrate")]
-fn setup_client_clock(
-    server_time_base: ReadSignal<String>,
-    cooldown_base: ReadSignal<u64>,
-    clock_started_at: ReadSignal<f64>,
-    set_current_server_time: WriteSignal<String>,
-    set_cooldown_remaining: WriteSignal<u64>,
-) {
+fn use_client_sync(signals: LiveStateSignals) {
     use leptos::leptos_dom::helpers::set_interval_with_handle;
     use std::time::Duration;
+    use wasm_bindgen::{JsCast, closure::Closure};
 
-    let Ok(handle) = set_interval_with_handle(
-        move || {
-            let elapsed_seconds =
-                ((performance_now() - clock_started_at.get_untracked()) / 1_000.0).max(0.0) as u64;
-            set_current_server_time.set(advance_server_time(
-                &server_time_base.get_untracked(),
-                elapsed_seconds,
-            ));
-            set_cooldown_remaining.set(
-                cooldown_base
-                    .get_untracked()
-                    .saturating_sub(elapsed_seconds),
-            );
-        },
-        Duration::from_secs(1),
-    ) else {
-        return;
-    };
-    on_cleanup(move || handle.clear());
-}
+    Effect::new(move |_| {
+        signals.clock_started_at.set(performance_now());
 
-#[cfg(not(feature = "hydrate"))]
-fn setup_client_clock(
-    _server_time_base: ReadSignal<String>,
-    _cooldown_base: ReadSignal<u64>,
-    _clock_started_at: ReadSignal<f64>,
-    _set_current_server_time: WriteSignal<String>,
-    _set_cooldown_remaining: WriteSignal<u64>,
-) {
+        let Ok(events) = web_sys::EventSource::new("/events") else {
+            return;
+        };
+        let on_message = Closure::<dyn FnMut(web_sys::Event)>::new(move |_| {
+            leptos::task::spawn_local(async move {
+                let Ok(state) = load_initial_state().await else {
+                    return;
+                };
+                signals.schedules.set(state.schedules);
+                signals
+                    .server_time_base
+                    .set(state.current_server_time.clone());
+                signals.current_server_time.set(state.current_server_time);
+                signals.last_feed_time.set(state.last_feed_time);
+                signals.cooldown_base.set(state.cooldown_remaining);
+                signals.cooldown_remaining.set(state.cooldown_remaining);
+                signals.clock_started_at.set(performance_now());
+                signals.feed_history.set(state.feed_history);
+            });
+        })
+        .into_js_value();
+        events.set_onmessage(Some(on_message.unchecked_ref()));
+        on_cleanup(move || {
+            events.set_onmessage(None);
+            events.close();
+        });
+    });
+
+    Effect::new(move |_| {
+        let Ok(handle) = set_interval_with_handle(
+            move || {
+                let elapsed_seconds =
+                    ((performance_now() - signals.clock_started_at.get_untracked()) / 1_000.0)
+                        .max(0.0) as u64;
+                signals.current_server_time.set(advance_server_time(
+                    &signals.server_time_base.get_untracked(),
+                    elapsed_seconds,
+                ));
+                signals.cooldown_remaining.set(
+                    signals
+                        .cooldown_base
+                        .get_untracked()
+                        .saturating_sub(elapsed_seconds),
+                );
+            },
+            Duration::from_secs(1),
+        ) else {
+            return;
+        };
+        on_cleanup(move || handle.clear());
+    });
 }
 
 #[cfg(feature = "hydrate")]
@@ -606,11 +602,6 @@ fn performance_now() -> f64 {
         .and_then(|window| window.performance())
         .map(|performance| performance.now())
         .unwrap_or_default()
-}
-
-#[cfg(not(feature = "hydrate"))]
-fn performance_now() -> f64 {
-    0.0
 }
 
 #[cfg(feature = "hydrate")]
