@@ -33,11 +33,11 @@
 ### モジュール構成
 
 - `src/main.rs`: 設定と各サービスの初期化，Axum ルータと Leptos ルートの結合，スケジューラおよびサーバの起動を行う．
-- `src/app/`: Leptos のルート，コンポーネント，server functions，共有する表示用データ型，ハイドレーション後の SSE 同期を責務別に提供する．
+- `src/app.rs`，`src/app/`: Leptos のルート，コンポーネント，server functions，共有する表示用データ型，ハイドレーション後の SSE 同期を責務別に提供する．
 - `src/feed.rs`: サーボモータ，モック動作，排他制御，クールタイムを含む共通給餌処理を管理する．
 - `src/camera.rs`: カメラ映像の配信，ルート定義，モック動作を管理する．
 - `src/events.rs`: 状態変更を通知する SSE ルートを提供する．
-- `src/schedule/`: SQLite の初期化と旧スキーマの移行，スケジュール・設定・給餌履歴の永続化，日時検証，スケジューラを責務別に管理する．
+- `src/schedule.rs`，`src/schedule/`: SQLite の初期化と旧スキーマの移行，スケジュール・設定・給餌履歴の永続化，日時検証，スケジューラを責務別に管理する．
 - `src/lib.rs`: feature に応じたモジュール公開と Leptos のハイドレーションエントリポイントを提供する．
 - `style/main.scss`: Web UI のスタイルを提供する．
 
