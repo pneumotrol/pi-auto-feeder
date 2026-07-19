@@ -119,20 +119,34 @@ fn Home(
 ) -> impl IntoView {
     let minimum_schedule = current_server_time[..16].replace(' ', "T");
     let (schedules, set_schedules) = signal(schedules);
+    let (server_time_base, _set_server_time_base) = signal(current_server_time.clone());
     let (current_server_time, set_current_server_time) = signal(current_server_time);
-    let (last_feed_time, set_last_feed_time) = signal(last_feed_time);
+    let (last_feed_time, _set_last_feed_time) = signal(last_feed_time);
+    let (cooldown_base, _set_cooldown_base) = signal(cooldown_remaining);
     let (cooldown_remaining, set_cooldown_remaining) = signal(cooldown_remaining);
-    let (feed_history, set_feed_history) = signal(feed_history);
+    let (clock_started_at, _set_clock_started_at) = signal(performance_now());
+    let (feed_history, _set_feed_history) = signal(feed_history);
     let (new_scheduled_at, set_new_scheduled_at) = signal(String::new());
     let feed = ServerAction::<FeedNow>::new();
     let delete = ServerAction::<DeleteSchedule>::new();
     let add = ServerAction::<AddSchedule>::new();
-    setup_live_updates(
-        set_schedules,
+    #[cfg(feature = "hydrate")]
+    setup_live_updates(LiveStateSignals {
+        schedules: set_schedules,
+        server_time_base: _set_server_time_base,
+        current_server_time: set_current_server_time,
+        last_feed_time: _set_last_feed_time,
+        cooldown_base: _set_cooldown_base,
+        cooldown_remaining: set_cooldown_remaining,
+        clock_started_at: _set_clock_started_at,
+        feed_history: _set_feed_history,
+    });
+    setup_client_clock(
+        server_time_base,
+        cooldown_base,
+        clock_started_at,
         set_current_server_time,
-        set_last_feed_time,
         set_cooldown_remaining,
-        set_feed_history,
     );
 
     Effect::new(move |_| {
@@ -503,13 +517,20 @@ async fn save_settings(cooldown_seconds: u64, feed_duration_ms: u64) -> Result<(
 }
 
 #[cfg(feature = "hydrate")]
-fn setup_live_updates(
-    set_schedules: WriteSignal<Vec<ScheduleView>>,
-    set_current_server_time: WriteSignal<String>,
-    set_last_feed_time: WriteSignal<Option<String>>,
-    set_cooldown_remaining: WriteSignal<u64>,
-    set_feed_history: WriteSignal<Vec<String>>,
-) {
+#[derive(Clone, Copy)]
+struct LiveStateSignals {
+    schedules: WriteSignal<Vec<ScheduleView>>,
+    server_time_base: WriteSignal<String>,
+    current_server_time: WriteSignal<String>,
+    last_feed_time: WriteSignal<Option<String>>,
+    cooldown_base: WriteSignal<u64>,
+    cooldown_remaining: WriteSignal<u64>,
+    clock_started_at: WriteSignal<f64>,
+    feed_history: WriteSignal<Vec<String>>,
+}
+
+#[cfg(feature = "hydrate")]
+fn setup_live_updates(signals: LiveStateSignals) {
     use wasm_bindgen::{JsCast, closure::Closure};
 
     let Ok(events) = web_sys::EventSource::new("/events") else {
@@ -520,11 +541,16 @@ fn setup_live_updates(
             let Ok(state) = load_initial_state().await else {
                 return;
             };
-            set_schedules.set(state.schedules);
-            set_current_server_time.set(state.current_server_time);
-            set_last_feed_time.set(state.last_feed_time);
-            set_cooldown_remaining.set(state.cooldown_remaining);
-            set_feed_history.set(state.feed_history);
+            signals.schedules.set(state.schedules);
+            signals
+                .server_time_base
+                .set(state.current_server_time.clone());
+            signals.current_server_time.set(state.current_server_time);
+            signals.last_feed_time.set(state.last_feed_time);
+            signals.cooldown_base.set(state.cooldown_remaining);
+            signals.cooldown_remaining.set(state.cooldown_remaining);
+            signals.clock_started_at.set(performance_now());
+            signals.feed_history.set(state.feed_history);
         });
     });
     events.set_onmessage(Some(on_message.as_ref().unchecked_ref()));
@@ -532,12 +558,72 @@ fn setup_live_updates(
     std::mem::forget(events);
 }
 
-#[cfg(not(feature = "hydrate"))]
-fn setup_live_updates(
-    _set_schedules: WriteSignal<Vec<ScheduleView>>,
-    _set_current_server_time: WriteSignal<String>,
-    _set_last_feed_time: WriteSignal<Option<String>>,
-    _set_cooldown_remaining: WriteSignal<u64>,
-    _set_feed_history: WriteSignal<Vec<String>>,
+#[cfg(feature = "hydrate")]
+fn setup_client_clock(
+    server_time_base: ReadSignal<String>,
+    cooldown_base: ReadSignal<u64>,
+    clock_started_at: ReadSignal<f64>,
+    set_current_server_time: WriteSignal<String>,
+    set_cooldown_remaining: WriteSignal<u64>,
 ) {
+    use leptos::leptos_dom::helpers::set_interval_with_handle;
+    use std::time::Duration;
+
+    let Ok(handle) = set_interval_with_handle(
+        move || {
+            let elapsed_seconds =
+                ((performance_now() - clock_started_at.get_untracked()) / 1_000.0).max(0.0) as u64;
+            set_current_server_time.set(advance_server_time(
+                &server_time_base.get_untracked(),
+                elapsed_seconds,
+            ));
+            set_cooldown_remaining.set(
+                cooldown_base
+                    .get_untracked()
+                    .saturating_sub(elapsed_seconds),
+            );
+        },
+        Duration::from_secs(1),
+    ) else {
+        return;
+    };
+    on_cleanup(move || handle.clear());
+}
+
+#[cfg(not(feature = "hydrate"))]
+fn setup_client_clock(
+    _server_time_base: ReadSignal<String>,
+    _cooldown_base: ReadSignal<u64>,
+    _clock_started_at: ReadSignal<f64>,
+    _set_current_server_time: WriteSignal<String>,
+    _set_cooldown_remaining: WriteSignal<u64>,
+) {
+}
+
+#[cfg(feature = "hydrate")]
+fn performance_now() -> f64 {
+    web_sys::window()
+        .and_then(|window| window.performance())
+        .map(|performance| performance.now())
+        .unwrap_or_default()
+}
+
+#[cfg(not(feature = "hydrate"))]
+fn performance_now() -> f64 {
+    0.0
+}
+
+#[cfg(feature = "hydrate")]
+fn advance_server_time(value: &str, elapsed_seconds: u64) -> String {
+    use chrono::{Duration, NaiveDateTime};
+
+    NaiveDateTime::parse_from_str(value, "%Y-%m-%d %H:%M:%S")
+        .ok()
+        .and_then(|time| {
+            i64::try_from(elapsed_seconds)
+                .ok()
+                .and_then(|seconds| time.checked_add_signed(Duration::seconds(seconds)))
+        })
+        .map(|time| time.format("%Y-%m-%d %H:%M:%S").to_string())
+        .unwrap_or_else(|| value.to_owned())
 }

@@ -19,14 +19,9 @@ async fn events(
 ) -> Sse<impl futures_util::Stream<Item = Result<Event, std::convert::Infallible>>> {
     let receiver = store.subscribe();
     let changes = stream::unfold(receiver, |mut receiver| async move {
-        tokio::select! {
-            result = receiver.recv() => {
-                match result {
-                    Ok(()) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
-                    Err(tokio::sync::broadcast::error::RecvError::Closed) => return None,
-                }
-            }
-            () = tokio::time::sleep(std::time::Duration::from_secs(1)) => {}
+        match receiver.recv().await {
+            Ok(()) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+            Err(tokio::sync::broadcast::error::RecvError::Closed) => return None,
         }
         Some((Ok(Event::default().data("changed")), receiver))
     });
