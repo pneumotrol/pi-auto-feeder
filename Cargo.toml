@@ -30,7 +30,6 @@ ssr = [
 ]
 hydrate = [
     "dep:console_error_panic_hook",
-    "dep:gloo-net",
     "dep:serde",
     "dep:wasm-bindgen",
     "dep:web-sys",
@@ -43,7 +42,6 @@ chrono = { version = "0.4.42", default-features = false, features = ["std"], opt
 color-eyre = { version = "0.6.5", optional = true }
 console_error_panic_hook = { version = "0.1.7", optional = true }
 futures-util = { version = "0.3.32", optional = true }
-gloo-net = { version = "0.6.0", optional = true }
 leptos = { version = "0.8.20", default-features = false }
 leptos_axum = { version = "0.8.0", optional = true }
 leptos_meta = { version = "0.8.0" }

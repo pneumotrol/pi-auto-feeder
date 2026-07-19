@@ -5,9 +5,9 @@ async fn main() -> color_eyre::Result<()> {
     use leptos::prelude::*;
     use leptos_axum::{LeptosRoutes, generate_route_list};
     use pi_auto_feeder::{
-        api,
         app::{App, shell},
         camera::{self, Camera},
+        events,
         feed::{FeedService, Feeder},
         schedule::{self, ScheduleStore},
     };
@@ -27,14 +27,18 @@ async fn main() -> color_eyre::Result<()> {
     let leptos_options = configuration.leptos_options;
     let routes = generate_route_list(App);
     let context_store = schedules.clone();
+    let context_feed_service = feed_service.clone();
 
     let app = Router::<LeptosOptions>::new()
-        .merge(api::router(feed_service, schedules))
+        .merge(events::router(schedules))
         .merge(camera::router(camera))
         .leptos_routes_with_context(
             &leptos_options,
             routes,
-            move || provide_context(context_store.clone()),
+            move || {
+                provide_context(context_store.clone());
+                provide_context(context_feed_service.clone());
+            },
             {
                 let leptos_options = leptos_options.clone();
                 move || shell(leptos_options.clone())

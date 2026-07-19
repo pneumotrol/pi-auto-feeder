@@ -1580,7 +1580,6 @@ dependencies = [
  "color-eyre",
  "console_error_panic_hook",
  "futures-util",
- "gloo-net",
  "leptos",
  "leptos_axum",
  "leptos_meta",

@@ -1,3 +1,4 @@
+use leptos::form::ActionForm;
 use leptos::prelude::*;
 use leptos_meta::{MetaTags, Stylesheet, Title, provide_meta_context};
 use leptos_router::{
@@ -31,11 +32,6 @@ pub struct ScheduleView {
     pub legacy_time: Option<String>,
     pub missed: bool,
     pub failure_reason: Option<String>,
-}
-
-#[derive(Clone, Deserialize, Serialize)]
-pub struct NewSchedule {
-    pub scheduled_at: String,
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -128,9 +124,9 @@ fn Home(
     let (cooldown_remaining, set_cooldown_remaining) = signal(cooldown_remaining);
     let (feed_history, set_feed_history) = signal(feed_history);
     let (new_scheduled_at, set_new_scheduled_at) = signal(String::new());
-    let feed = Action::new_local(|_: &()| request_feed());
-    let delete = Action::new_local(|id: &i64| request_delete(*id));
-    let add = Action::new_local(|scheduled_at: &String| request_add(scheduled_at.clone()));
+    let feed = ServerAction::<FeedNow>::new();
+    let delete = ServerAction::<DeleteSchedule>::new();
+    let add = ServerAction::<AddSchedule>::new();
     setup_live_updates(
         set_schedules,
         set_current_server_time,
@@ -161,7 +157,7 @@ fn Home(
         } else {
             match feed.value().get() {
                 Some(Ok(_)) => "給餌しました".to_owned(),
-                Some(Err(message)) => message,
+                Some(Err(message)) => message.to_string(),
                 None => String::new(),
             }
         }
@@ -180,20 +176,11 @@ fn Home(
                 <img src="/camera/stream" alt="給餌器のカメラ映像" />
             </section>
 
-            <form
-                method="post"
-                action="/feed"
-                on:submit=move |event| {
-                    event.prevent_default();
-                    if !feed.pending().get_untracked() {
-                        feed.dispatch(());
-                    }
-                }
-            >
+            <ActionForm action=feed>
                 <button type="submit" disabled=move || feed.pending().get()>
                     {move || if feed.pending().get() { "給餌中…" } else { "給餌する" }}
                 </button>
-            </form>
+            </ActionForm>
             <p aria-live="polite">{feed_status}</p>
 
             <section>
@@ -209,7 +196,6 @@ fn Home(
                                     .into_iter()
                                     .map(|schedule| {
                                         let id = schedule.id;
-                                        let action = format!("/schedules/{id}/delete");
                                         let scheduled_at = schedule.scheduled_at.clone();
                                         let legacy_time = schedule.legacy_time.clone();
                                         let failure_reason = schedule.failure_reason.clone();
@@ -250,17 +236,10 @@ fn Home(
                                                         }
                                                             .into_any()
                                                     }
-                                                }}
-                                                <form
-                                                    method="post"
-                                                    action=action
-                                                    on:submit=move |event| {
-                                                        event.prevent_default();
-                                                        delete.dispatch(id);
-                                                    }
-                                                >
+                                                }} <ActionForm action=delete>
+                                                    <input type="hidden" name="id" value=id />
                                                     <button type="submit">"削除"</button>
-                                                </form>
+                                                </ActionForm>
                                             </li>
                                         }
                                     })
@@ -271,17 +250,7 @@ fn Home(
                     }
                 }}
 
-                <form
-                    method="post"
-                    action="/schedules"
-                    on:submit=move |event| {
-                        event.prevent_default();
-                        let scheduled_at = new_scheduled_at.get_untracked();
-                        if !scheduled_at.is_empty() && !add.pending().get_untracked() {
-                            add.dispatch(scheduled_at);
-                        }
-                    }
-                >
+                <ActionForm action=add>
                     <label for="schedule-datetime">"給餌日時"</label>
                     <input
                         id="schedule-datetime"
@@ -297,11 +266,11 @@ fn Home(
                     <button type="submit" disabled=move || add.pending().get()>
                         {move || if add.pending().get() { "追加中…" } else { "追加" }}
                     </button>
-                </form>
+                </ActionForm>
                 <p aria-live="polite">
                     {move || match add.value().get() {
                         Some(Ok(_)) => "スケジュールを追加しました",
-                        Some(Err(())) => "スケジュールの追加に失敗しました",
+                        Some(Err(_)) => "スケジュールの追加に失敗しました",
                         None => "",
                     }}
                 </p>
@@ -365,43 +334,45 @@ fn Home(
 async fn load_initial_state() -> Result<InitialState, ServerFnError> {
     use crate::schedule::ScheduleStore;
     let store = expect_context::<ScheduleStore>();
-    crate::api::app_state(&store)
+    let status = store.status().await.map_err(ServerFnError::new)?;
+    let schedules = store
+        .list()
         .await
-        .map_err(|status| ServerFnError::new(format!("failed to load state: {status}")))
-}
-
-#[cfg(feature = "hydrate")]
-async fn request_feed() -> Result<String, String> {
-    let response = gloo_net::http::Request::post("/api/feed")
-        .send()
-        .await
-        .map_err(|_| "通信に失敗しました".to_owned())?;
-    if !response.ok() {
-        return Err(response
-            .text()
+        .map_err(ServerFnError::new)?
+        .into_iter()
+        .map(|schedule| ScheduleView {
+            id: schedule.id,
+            scheduled_at: schedule.scheduled_at,
+            legacy_time: schedule.legacy_time,
+            missed: schedule.missed,
+            failure_reason: schedule.failure_reason,
+        })
+        .collect();
+    Ok(InitialState {
+        schedules,
+        current_server_time: status.current_time,
+        last_feed_time: status.last_feed_time,
+        cooldown_remaining: store
+            .cooldown_remaining()
             .await
-            .unwrap_or_else(|_| "給餌できませんでした".to_owned()));
-    }
-    response
-        .text()
-        .await
-        .map_err(|_| "応答を読み取れませんでした".to_owned())
-}
-
-#[cfg(not(feature = "hydrate"))]
-async fn request_feed() -> Result<String, String> {
-    Err("給餌できませんでした".to_owned())
+            .map_err(ServerFnError::new)?,
+        feed_history: store
+            .recent_feed_history()
+            .await
+            .map_err(ServerFnError::new)?,
+    })
 }
 
 #[component]
 pub fn SettingsPage(settings: SettingsView) -> impl IntoView {
+    let save = ServerAction::<SaveSettings>::new();
     view! {
         <main>
             <h1>"設定"</h1>
             <nav>
                 <a href="/">"トップへ戻る"</a>
             </nav>
-            <form method="post" action="/settings">
+            <ActionForm action=save>
                 <label for="cooldown-seconds">"給餌のクールタイム（秒）"</label>
                 <input
                     id="cooldown-seconds"
@@ -425,7 +396,14 @@ pub fn SettingsPage(settings: SettingsView) -> impl IntoView {
                     value=settings.feed_duration_ms
                 />
                 <button type="submit">"保存"</button>
-            </form>
+            </ActionForm>
+            <p aria-live="polite">
+                {move || match save.value().get() {
+                    Some(Ok(())) => "設定を保存しました",
+                    Some(Err(_)) => "設定を保存できませんでした",
+                    None => "",
+                }}
+            </p>
         </main>
     }
 }
@@ -471,37 +449,57 @@ async fn load_settings() -> Result<SettingsView, ServerFnError> {
     })
 }
 
-#[cfg(feature = "hydrate")]
-async fn request_delete(id: i64) -> Result<i64, ()> {
-    let response = gloo_net::http::Request::post(&format!("/api/schedules/{id}/delete"))
-        .send()
+#[server]
+async fn feed_now() -> Result<String, ServerFnError> {
+    use crate::feed::{FeedOutcome, FeedService};
+    match expect_context::<FeedService>()
+        .feed()
         .await
-        .map_err(|_| ())?;
-    response.ok().then_some(id).ok_or(())
-}
-
-#[cfg(not(feature = "hydrate"))]
-async fn request_delete(_id: i64) -> Result<i64, ()> {
-    Err(())
-}
-
-#[cfg(feature = "hydrate")]
-async fn request_add(scheduled_at: String) -> Result<ScheduleView, ()> {
-    let response = gloo_net::http::Request::post("/api/schedules")
-        .json(&NewSchedule { scheduled_at })
-        .map_err(|_| ())?
-        .send()
-        .await
-        .map_err(|_| ())?;
-    if !response.ok() {
-        return Err(());
+        .map_err(ServerFnError::new)?
+    {
+        FeedOutcome::Fed(fed_at) => Ok(fed_at),
+        FeedOutcome::Cooldown(remaining) => Err(ServerFnError::new(format!(
+            "クールタイム中です．残り {remaining} 秒"
+        ))),
     }
-    response.json().await.map_err(|_| ())
 }
 
-#[cfg(not(feature = "hydrate"))]
-async fn request_add(_scheduled_at: String) -> Result<ScheduleView, ()> {
-    Err(())
+#[server]
+async fn add_schedule(scheduled_at: String) -> Result<ScheduleView, ServerFnError> {
+    use crate::schedule::ScheduleStore;
+    let schedule = expect_context::<ScheduleStore>()
+        .add(&scheduled_at)
+        .await
+        .map_err(ServerFnError::new)?;
+    Ok(ScheduleView {
+        id: schedule.id,
+        scheduled_at: schedule.scheduled_at,
+        legacy_time: schedule.legacy_time,
+        missed: schedule.missed,
+        failure_reason: schedule.failure_reason,
+    })
+}
+
+#[server]
+async fn delete_schedule(id: i64) -> Result<i64, ServerFnError> {
+    use crate::schedule::ScheduleStore;
+    expect_context::<ScheduleStore>()
+        .delete(id)
+        .await
+        .map_err(ServerFnError::new)?;
+    Ok(id)
+}
+
+#[server]
+async fn save_settings(cooldown_seconds: u64, feed_duration_ms: u64) -> Result<(), ServerFnError> {
+    use crate::schedule::{ScheduleStore, Settings};
+    expect_context::<ScheduleStore>()
+        .update_settings(&Settings {
+            cooldown_seconds,
+            feed_duration_ms,
+        })
+        .await
+        .map_err(ServerFnError::new)
 }
 
 #[cfg(feature = "hydrate")]
@@ -514,15 +512,12 @@ fn setup_live_updates(
 ) {
     use wasm_bindgen::{JsCast, closure::Closure};
 
-    let Ok(events) = web_sys::EventSource::new("/api/events") else {
+    let Ok(events) = web_sys::EventSource::new("/events") else {
         return;
     };
     let on_message = Closure::<dyn FnMut()>::new(move || {
         leptos::task::spawn_local(async move {
-            let Ok(response) = gloo_net::http::Request::get("/api/state").send().await else {
-                return;
-            };
-            let Ok(state) = response.json::<InitialState>().await else {
+            let Ok(state) = load_initial_state().await else {
                 return;
             };
             set_schedules.set(state.schedules);

@@ -1,9 +1,9 @@
 pub mod app;
 
 #[cfg(feature = "ssr")]
-pub mod api;
-#[cfg(feature = "ssr")]
 pub mod camera;
+#[cfg(feature = "ssr")]
+pub mod events;
 #[cfg(feature = "ssr")]
 pub mod feed;
 #[cfg(feature = "ssr")]
