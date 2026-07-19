@@ -1,3 +1,4 @@
+use crate::app::{InitialState, NewSchedule, ScheduleView, SettingsView};
 use crate::{
     feed::{FeedOutcome, FeedService},
     schedule::{ScheduleStore, Settings},
@@ -6,28 +7,26 @@ use axum::{
     Form, Json, Router,
     extract::{Path, State},
     http::StatusCode,
-    response::{Html, Redirect, Sse, sse::Event},
+    response::{Redirect, Sse, sse::Event},
     routing::{get, post},
 };
 use futures_util::stream;
-use leptos::prelude::*;
-use pi_auto_feeder::{App, InitialState, NewSchedule, ScheduleView, SettingsPage, SettingsView};
+use leptos::prelude::LeptosOptions;
 
 #[derive(Clone)]
 struct FeedState {
     feeder: FeedService,
 }
 
-pub fn router(feeder: FeedService, store: ScheduleStore) -> Router {
+pub fn router(feeder: FeedService, store: ScheduleStore) -> Router<LeptosOptions> {
     let web_routes = Router::new()
-        .route("/", get(index))
         .route("/schedules", post(add_schedule_from_form))
         .route("/api/schedules", post(add_schedule_from_json))
         .route("/schedules/{id}/delete", post(delete_schedule_from_form))
         .route("/api/schedules/{id}/delete", post(delete_schedule_from_api))
         .route("/api/state", get(state_from_api))
         .route("/api/events", get(events))
-        .route("/settings", get(settings_page).post(update_settings))
+        .route("/settings", post(update_settings))
         .with_state(store);
     let feed_routes = Router::new()
         .route("/feed", post(feed_from_form))
@@ -36,27 +35,7 @@ pub fn router(feeder: FeedService, store: ScheduleStore) -> Router {
     web_routes.merge(feed_routes)
 }
 
-async fn index(State(store): State<ScheduleStore>) -> Result<Html<String>, StatusCode> {
-    let initial_state = app_state(&store).await?;
-    let app = view! {
-        <App
-            schedules=initial_state.schedules.clone()
-            current_server_time=initial_state.current_server_time.clone()
-            last_feed_time=initial_state.last_feed_time.clone()
-            cooldown_remaining=initial_state.cooldown_remaining
-            feed_history=initial_state.feed_history.clone()
-        />
-    }
-    .to_html();
-    let state_json = serde_json::to_string(&initial_state).map_err(internal_error)?;
-    let head = format!(
-        r#"<script id="initial-state" type="application/json">{state_json}</script>
-<script type="module">import init from "/assets/pi-auto-feeder.js"; await init();</script>"#
-    );
-    Ok(Html(document("Pi Auto Feeder", &app, &head)))
-}
-
-async fn app_state(store: &ScheduleStore) -> Result<InitialState, StatusCode> {
+pub(crate) async fn app_state(store: &ScheduleStore) -> Result<InitialState, StatusCode> {
     let status = store.status().await.map_err(internal_error)?;
     let schedules = store
         .list()
@@ -171,18 +150,6 @@ async fn delete_schedule(store: &ScheduleStore, id: i64) -> Result<(), StatusCod
     store.delete(id).await.map_err(internal_error)
 }
 
-async fn settings_page(State(store): State<ScheduleStore>) -> Result<Html<String>, StatusCode> {
-    let settings = store.settings().await.map_err(internal_error)?;
-    let page = view! {
-        <SettingsPage settings=SettingsView {
-            cooldown_seconds: settings.cooldown_seconds,
-            feed_duration_ms: settings.feed_duration_ms,
-        } />
-    }
-    .to_html();
-    Ok(Html(document("設定", &page, "")))
-}
-
 async fn update_settings(
     State(store): State<ScheduleStore>,
     Form(settings): Form<SettingsView>,
@@ -208,12 +175,6 @@ fn schedule_view(schedule: crate::schedule::Schedule) -> ScheduleView {
         missed: schedule.missed,
         failure_reason: schedule.failure_reason,
     }
-}
-
-fn document(title: &str, body: &str, head: &str) -> String {
-    format!(
-        "<!doctype html><html lang=\"ja\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>{title}</title>{head}</head><body>{body}</body></html>"
-    )
 }
 
 fn internal_error(error: impl std::fmt::Display) -> StatusCode {

@@ -8,6 +8,7 @@ use axum::{
 };
 use color_eyre::eyre::{Result, WrapErr, eyre};
 use futures_util::{StreamExt, stream};
+use leptos::prelude::LeptosOptions;
 use std::{
     env::{self, VarError},
     process::Stdio,
@@ -97,7 +98,7 @@ impl Camera {
     }
 }
 
-pub fn router(camera: Camera) -> Router {
+pub fn router(camera: Camera) -> Router<LeptosOptions> {
     Router::new()
         .route("/camera/stream", get(stream))
         .with_state(camera)
