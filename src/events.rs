@@ -2,7 +2,10 @@ use crate::schedule::ScheduleStore;
 use axum::{
     Router,
     extract::State,
-    response::{Sse, sse::Event},
+    response::{
+        Sse,
+        sse::{Event, KeepAlive},
+    },
     routing::get,
 };
 use futures_util::stream;
@@ -25,5 +28,5 @@ async fn events(
         }
         Some((Ok(Event::default().data("changed")), receiver))
     });
-    Sse::new(changes)
+    Sse::new(changes).keep_alive(KeepAlive::default())
 }

@@ -47,9 +47,9 @@ leptos_meta = { version = "0.8.0" }
 leptos_router = { version = "0.8.0" }
 rppal = { version = "0.22.1", optional = true }
 serde = { version = "1.0.228", features = ["derive"], optional = true }
-sqlx = { version = "0.8.6", default-features = false, features = ["macros", "runtime-tokio", "sqlite"], optional = true }
+sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio", "sqlite"], optional = true }
 tokio = { version = "1.52.3", features = ["full"], optional = true }
-tokio-util = { version = "0.7.18", features = ["io"], optional = true }
+tokio-util = { version = "0.7.18", features = ["io", "rt"], optional = true }
 wasm-bindgen = { version = "0.2.116", optional = true }
 web-sys = { version = "0.3.103", features = ["Event", "EventSource", "Performance", "Window"], optional = true }
 
@@ -66,7 +66,7 @@ site-root = "target/site"
 site-pkg-dir = "pkg"
 style-file = "style/main.scss"
 assets-dir = "public"
-site-addr = "0.0.0.0:3000"
+site-addr = "127.0.0.1:3000"
 reload-port = 3001
 browserquery = "defaults"
 bin-features = ["ssr"]

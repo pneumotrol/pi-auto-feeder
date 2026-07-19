@@ -1,7 +1,7 @@
 #[cfg(feature = "ssr")]
 #[tokio::main]
 async fn main() -> color_eyre::Result<()> {
-    use axum::Router;
+    use axum::{Router, middleware};
     use leptos::prelude::*;
     use leptos_axum::{LeptosRoutes, generate_route_list};
     use pi_auto_feeder::{
@@ -11,6 +11,7 @@ async fn main() -> color_eyre::Result<()> {
         feed::{FeedService, Feeder},
         schedule::{self, ScheduleStore},
     };
+    use tokio_util::sync::CancellationToken;
 
     color_eyre::install()?;
     let feeder = Feeder::from_env()?;
@@ -20,7 +21,12 @@ async fn main() -> color_eyre::Result<()> {
     println!("Camera mode: {}", camera.mode());
 
     let feed_service = FeedService::new(feeder, schedules.clone());
-    schedule::start_scheduler(schedules.clone(), feed_service.clone());
+    let cancellation = CancellationToken::new();
+    let scheduler = schedule::start_scheduler(
+        schedules.clone(),
+        feed_service.clone(),
+        cancellation.clone(),
+    );
 
     let configuration = get_configuration(None)?;
     let address = configuration.leptos_options.site_addr;
@@ -45,12 +51,124 @@ async fn main() -> color_eyre::Result<()> {
             },
         )
         .fallback(leptos_axum::file_and_error_handler(shell))
+        .layer(middleware::from_fn(require_same_origin))
         .with_state(leptos_options);
 
     println!("Listening on http://{address}");
     let listener = tokio::net::TcpListener::bind(address).await?;
-    axum::serve(listener, app.into_make_service()).await?;
+    let server_result = axum::serve(listener, app.into_make_service())
+        .with_graceful_shutdown(shutdown_signal(cancellation.clone()))
+        .await;
+    cancellation.cancel();
+    scheduler.await?;
+    server_result?;
     Ok(())
+}
+
+#[cfg(feature = "ssr")]
+async fn shutdown_signal(cancellation: tokio_util::sync::CancellationToken) {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{SignalKind, signal};
+
+        let Ok(mut terminate) = signal(SignalKind::terminate()) else {
+            if let Err(error) = tokio::signal::ctrl_c().await {
+                eprintln!("Failed to listen for a shutdown signal: {error}");
+            }
+            cancellation.cancel();
+            return;
+        };
+        tokio::select! {
+            result = tokio::signal::ctrl_c() => {
+                if let Err(error) = result {
+                    eprintln!("Failed to listen for Ctrl+C: {error}");
+                }
+            }
+            _ = terminate.recv() => {}
+        }
+    }
+    #[cfg(not(unix))]
+    if let Err(error) = tokio::signal::ctrl_c().await {
+        eprintln!("Failed to listen for Ctrl+C: {error}");
+    }
+
+    cancellation.cancel();
+}
+
+#[cfg(feature = "ssr")]
+async fn require_same_origin(
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    use axum::{
+        http::{Method, StatusCode},
+        response::IntoResponse,
+    };
+
+    let is_safe_method = matches!(
+        *request.method(),
+        Method::GET | Method::HEAD | Method::OPTIONS
+    );
+    if !is_safe_method && !has_same_origin(request.headers()) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    next.run(request).await
+}
+
+#[cfg(feature = "ssr")]
+fn has_same_origin(headers: &axum::http::HeaderMap) -> bool {
+    use axum::http::header;
+
+    let Some(origin) = headers.get(header::ORIGIN) else {
+        return true;
+    };
+    let (Ok(origin), Some(host)) = (
+        origin.to_str(),
+        headers
+            .get(header::HOST)
+            .and_then(|host| host.to_str().ok()),
+    ) else {
+        return false;
+    };
+    origin
+        .split_once("://")
+        .is_some_and(|(_, authority)| authority.trim_end_matches('/') == host)
+}
+
+#[cfg(all(test, feature = "ssr"))]
+mod tests {
+    use super::*;
+    use axum::http::{HeaderMap, HeaderValue, header};
+
+    #[test]
+    fn accepts_same_origin_and_requests_without_origin() {
+        let mut headers = HeaderMap::new();
+        assert!(has_same_origin(&headers));
+
+        headers.insert(
+            header::HOST,
+            HeaderValue::from_static("feeder.example:3000"),
+        );
+        headers.insert(
+            header::ORIGIN,
+            HeaderValue::from_static("https://feeder.example:3000"),
+        );
+        assert!(has_same_origin(&headers));
+    }
+
+    #[test]
+    fn rejects_cross_origin_and_malformed_origin() {
+        let mut headers = HeaderMap::new();
+        headers.insert(header::HOST, HeaderValue::from_static("feeder.example"));
+        headers.insert(
+            header::ORIGIN,
+            HeaderValue::from_static("https://attacker.example"),
+        );
+        assert!(!has_same_origin(&headers));
+
+        headers.insert(header::ORIGIN, HeaderValue::from_static("null"));
+        assert!(!has_same_origin(&headers));
+    }
 }
 
 #[cfg(not(feature = "ssr"))]

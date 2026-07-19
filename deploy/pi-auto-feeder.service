@@ -1,0 +1,29 @@
+[Unit]
+Description=Pi Auto Feeder
+After=network-online.target tailscaled.service
+Wants=network-online.target
+Requires=tailscaled.service
+
+[Service]
+Type=simple
+User=pi-auto-feeder
+Group=pi-auto-feeder
+SupplementaryGroups=gpio video
+WorkingDirectory=/var/lib/pi-auto-feeder
+EnvironmentFile=-/etc/pi-auto-feeder.env
+Environment=DATABASE_URL=sqlite:///var/lib/pi-auto-feeder/pi-auto-feeder.sqlite3
+Environment=LEPTOS_SITE_ADDR=127.0.0.1:3000
+Environment=LEPTOS_SITE_ROOT=/usr/local/share/pi-auto-feeder/site
+ExecStart=/usr/local/bin/pi-auto-feeder
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=30s
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=full
+ReadWritePaths=/var/lib/pi-auto-feeder /sys/class/pwm
+
+[Install]
+WantedBy=multi-user.target
