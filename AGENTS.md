@@ -16,10 +16,11 @@
 ## アーキテクチャ
 
 - Raspberry Pi 上で Axum サーバを動作させる．
-- Web UI は Leptos を利用する．
-- 初回表示はサーバサイドレンダリングし，Leptos のハイドレーション後は給餌とスケジュール操作を非同期で行う．
-- サーバ側の状態変化は Server-Sent Events（SSE）で開いているトップ画面へ通知する．
+- Web UI は Leptos 0.8 を利用し，SSR とハイドレーションを単一の `App` から構成する．
+- データの取得と更新には Leptos の server functions を利用する．初回表示はサーバサイドレンダリングし，ハイドレーション後は `Resource`，`ServerAction`，`ActionForm` などの標準機能で非同期に操作する．
+- サーバ側の状態変化は Server-Sent Events（SSE）で開いているトップ画面へ通知する．SSE は変更通知のみを送り，通知を受けたクライアントは server function から最新状態を再取得する．
 - GPIO 制御は Rust から行う．
+- カメラ映像は Axum の専用ルートから配信し，実機では `ffmpeg` と `/dev/video0` を利用する．
 - スケジュール給餌は Raspberry Pi 単体で動作し，外部サービスに依存しない．
 - スケジュールと最終給餌時刻は SQLite に保存し，`sqlx` から操作する．
 - スケジュールはサーバのローカル日時で管理する．未来の日時だけを登録可能とする．
@@ -31,12 +32,14 @@
 
 ### モジュール構成
 
-- `src/main.rs`: 各機能の初期化，ルータの結合，サーバの起動を行う．
-- `src/api.rs`: HTML 生成と HTTP ハンドラを提供し，フォームと非同期 API の共通処理を管理する．
+- `src/main.rs`: 設定と各サービスの初期化，Axum ルータと Leptos ルートの結合，スケジューラおよびサーバの起動を行う．
+- `src/app.rs`: Leptos のルート，コンポーネント，server functions，共有する表示用データ型，ハイドレーション後の SSE 同期を提供する．
 - `src/feed.rs`: サーボモータ，モック動作，排他制御，クールタイムを含む共通給餌処理を管理する．
 - `src/camera.rs`: カメラ映像の配信，ルート定義，モック動作を管理する．
-- `src/schedule.rs`: SQLite 操作，時刻の検証，スケジューラを管理する．
-- `src/lib.rs`: Leptos UI，ハイドレーション，ブラウザとサーバで共有するデータ型を提供する．
+- `src/events.rs`: 状態変更を通知する SSE ルートを提供する．
+- `src/schedule.rs`: SQLite の初期化と旧スキーマの移行，スケジュール・設定・給餌履歴の永続化，日時検証，スケジューラを管理する．
+- `src/lib.rs`: feature に応じたモジュール公開と Leptos のハイドレーションエントリポイントを提供する．
+- `style/main.scss`: Web UI のスタイルを提供する．
 
 ## 主要技術
 
@@ -56,6 +59,9 @@
 - 外部サービスへの依存は必要最小限とする．
 - シンプルさを優先し，過度な抽象化や将来の拡張を見越した設計は避ける（YAGNI を意識する）．
 - 既存の設計との一貫性を保つことを優先する．
+- UI，ルーティング，フォーム，非同期処理，状態管理，SSR，ハイドレーションには Leptos の標準的な実装を最優先する．独自の仕組みは，Leptos の標準機能では要件を満たせない場合に限る．
+- 給餌という物理操作の安全性を優先し，手動給餌とスケジュール給餌の排他制御，クールタイム，成功後の履歴記録を一つのサービスに集約する．
+- SQLite の既存データを失わないことを重視し，スキーマ変更は後方互換性のある明示的な移行として実装する．
 
 ## コーディング規約
 
@@ -63,22 +69,27 @@
 - `cargo fmt` および `leptosfmt` による整形を前提とする．
 - `panic!` は通常のエラー処理に利用しない．
 - `unsafe` は必要最小限に留める．
-- アプリケーション層では `color_eyre` を利用する．
-- ライブラリ層では `thiserror` を利用する．
+- サーバ側のアプリケーションエラーには `color_eyre` を利用し，server function の境界で `ServerFnError` に変換する．
+- `println!` と `eprintln!` は起動情報や最小限の運用ログに留め，秘密情報や不必要な内部情報を出力しない．
 
 ## Web UI
 
-- UI は Leptos を用いて実装する．
-- JavaScript を直接記述するよりも，Leptos の機能を優先して利用する．
+- UI は Leptos のコンポーネントとして実装し，Leptos 公式ドキュメントおよび同じメジャーバージョンの標準的なパターンを優先する．
+- データ取得には server functions と `Resource` / `Suspense`，更新には server functions と `ActionForm` / `ServerAction`，画面遷移には `leptos_router` を優先する．同じ通信処理を独自 API と server function の双方に重複実装しない．
+- ブラウザ固有 API や JavaScript を直接扱うのは，SSE など Leptos の標準機能だけでは実現できない処理に限定し，`#[cfg(feature = "hydrate")]` でサーバビルドから分離する．
+- サーバを正とし，クライアント側の状態は server function の結果または SSE 通知後の再取得によって同期する．楽観的更新を行う場合も，失敗時にサーバ状態へ戻せるようにする．
 - 手動給餌とスケジュールの追加・削除は，ハイドレーション後にページを再読み込みせず反映する．
-- JavaScript または Wasm が利用できない場合も操作できるよう，通常の HTML フォームをフォールバックとして維持する．
+- JavaScript または Wasm が利用できない場合も操作できるよう，`ActionForm` による通常の HTML フォームのフォールバックを維持する．
 - サーバ時刻，最終給餌時刻，クールタイム，スケジュールの変化は SSE 経由で自動反映する．
+- 非同期処理には処理中・成功・失敗の状態を表示し，二重送信を防止する．主要な状態通知には `aria-live` などを用い，キーボード操作と支援技術を妨げない HTML を維持する．
 
 ## 実行時設定
 
 - `DATABASE_URL`: SQLite の接続先．既定値は `sqlite://pi-auto-feeder.sqlite3` とする．
 - `FEEDER_MOCK`: `true` の場合は GPIO を操作せず給餌を模擬する．
 - `CAMERA_MOCK`: `true` の場合はカメラの代わりにモック画像を配信する．
+- 実機モードでは Raspberry Pi の PWM0（BCM GPIO18，物理ピン 12）と `/dev/video0` を使用し，カメラ配信には `ffmpeg` が必要となる．
+- 開発および自動テストでは，意図しない GPIO・カメラ操作を避けるため `FEEDER_MOCK=true` と `CAMERA_MOCK=true` を利用する．
 
 ## セキュリティ
 
@@ -100,8 +111,12 @@ cargo fmt
 leptosfmt src/**/*.rs
 cargo clippy --all-targets -- -D warnings
 cargo test
-trunk build
+cargo leptos build
 ```
+
+- DB スキーマ，スケジューラ，クールタイム，給餌処理を変更した場合は，正常系だけでなく，期限切れ，重複，失敗，旧 DB からの移行をテストする．
+- UI または server functions を変更した場合は，SSR，ハイドレーション後の操作，SSE 再同期，JavaScript 無効時のフォーム送信を確認する．
+- リリース前にはモックで一連の操作を確認した後，実機上で GPIO，カメラ，タイムゾーン，サービス再起動後の DB 継続性を確認する．
 
 ## メンテナンスポリシー
 
