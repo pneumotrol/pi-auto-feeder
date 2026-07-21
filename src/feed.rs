@@ -1,3 +1,5 @@
+//! サーボ制御と、すべての給餌経路で共有する安全性チェックを提供する。
+
 use crate::schedule::ScheduleStore;
 #[cfg(test)]
 use color_eyre::eyre::bail;
@@ -19,6 +21,7 @@ const FEED_ANGLE_DEGREES: u64 = 90;
 const POSITION_SETTLE_TIME: Duration = Duration::from_secs(1);
 
 #[derive(Clone)]
+/// 実機 PWM または開発用モックを選択してサーボを駆動する低レベルドライバ。
 pub struct Feeder {
     backend: FeederBackend,
 }
@@ -32,18 +35,23 @@ enum FeederBackend {
 }
 
 #[derive(Clone)]
+/// 排他制御、クールタイム判定、給餌履歴の記録を一つの操作として提供する。
 pub struct FeedService {
     feeder: Feeder,
     store: ScheduleStore,
     lock: Arc<Mutex<()>>,
 }
 
+/// 給餌要求が物理操作まで進んだか、クールタイムで抑止されたかを表す。
 pub enum FeedOutcome {
+    /// 給餌に成功した時刻。サーバのローカル日時で表す。
     Fed(String),
+    /// 給餌可能になるまでの残り秒数。
     Cooldown(u64),
 }
 
 impl FeedService {
+    /// 指定したドライバと永続化ストアを共有する給餌サービスを構築する。
     pub fn new(feeder: Feeder, store: ScheduleStore) -> Self {
         Self {
             feeder,
@@ -52,7 +60,9 @@ impl FeedService {
         }
     }
 
+    /// クールタイムを検査して給餌し、成功した物理操作だけを履歴へ記録する。
     pub async fn feed(&self) -> Result<FeedOutcome> {
+        // ロック取得後にクールタイムを再確認することで、同時要求による二重給餌を防ぐ。
         let _guard = self.lock.lock().await;
         let remaining = self.store.cooldown_remaining().await?;
         if remaining > 0 {
@@ -60,6 +70,7 @@ impl FeedService {
         }
         let settings = self.store.settings().await?;
         self.feeder.feed(settings.feed_duration_ms).await?;
+        // 物理操作後の記録失敗は再試行すると二重給餌になるため、文脈付きエラーとして返す。
         let fed_at = self
             .store
             .record_feed()
@@ -70,6 +81,7 @@ impl FeedService {
 }
 
 impl Feeder {
+    /// `FEEDER_MOCK` から実機とモックを選ぶ。未指定時は実機を使用する。
     pub fn from_env() -> Result<Self> {
         let mock = match env::var("FEEDER_MOCK") {
             Ok(value) => value
@@ -88,6 +100,7 @@ impl Feeder {
         })
     }
 
+    /// 起動ログに表示できる現在のドライバ名を返す。
     pub fn mode(&self) -> &'static str {
         match self.backend {
             FeederBackend::Hardware => "hardware",
@@ -97,6 +110,7 @@ impl Feeder {
         }
     }
 
+    /// 選択済みのバックエンドで指定時間だけ給餌位置を維持する。
     async fn feed(&self, duration_ms: u64) -> Result<()> {
         match self.backend {
             FeederBackend::Mock => {
@@ -124,6 +138,7 @@ async fn feed_with_hardware_pwm(feed_duration: Duration) -> rppal::pwm::Result<(
         true,
     )?;
 
+    // 起動直後と復帰直後に静止時間を設け、サーボが目標位置へ達するのを待つ。
     tokio::time::sleep(POSITION_SETTLE_TIME).await;
     pwm.set_pulse_width(pulse_width(FEED_ANGLE_DEGREES))?;
     tokio::time::sleep(feed_duration).await;
@@ -133,6 +148,7 @@ async fn feed_with_hardware_pwm(feed_duration: Duration) -> rppal::pwm::Result<(
     Ok(())
 }
 
+/// 0～180 度の角度をサーボ用の 0.5～2.5 ms パルス幅へ線形変換する。
 fn pulse_width(angle_degrees: u64) -> Duration {
     let pulse_range = MAX_PULSE_WIDTH_MICROS - MIN_PULSE_WIDTH_MICROS;
     let micros = MIN_PULSE_WIDTH_MICROS + pulse_range * angle_degrees / MAX_ANGLE_DEGREES;

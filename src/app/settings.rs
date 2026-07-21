@@ -1,3 +1,5 @@
+//! 設定の取得と保存を行う Leptos 画面。
+
 use super::{
     model::SettingsView,
     server_fns::{SaveSettings, load_settings},
@@ -6,6 +8,7 @@ use leptos::{form::ActionForm, prelude::*};
 use leptos_router::components::A;
 
 #[component]
+/// 設定を非同期取得し、読み込み中と失敗時の表示を切り替えるルート。
 pub(super) fn SettingsRoute() -> impl IntoView {
     let settings = Resource::new(|| (), |_| load_settings());
     view! {
@@ -34,6 +37,7 @@ pub(super) fn SettingsRoute() -> impl IntoView {
 }
 
 #[component]
+/// JavaScript 無効時にも通常送信できる設定フォームを描画する。
 fn SettingsPage(settings: SettingsView) -> impl IntoView {
     let save = ServerAction::<SaveSettings>::new();
     view! {

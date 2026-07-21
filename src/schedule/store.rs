@@ -1,3 +1,5 @@
+//! SQLite を正とするスケジュール・設定・給餌履歴ストア。
+
 use super::{
     MAX_COOLDOWN_SECONDS, MAX_FEED_DURATION_MS, MIN_FEED_DURATION_MS, Schedule, ServerStatus,
     Settings, migration,
@@ -14,18 +16,21 @@ use tokio::sync::broadcast;
 const DEFAULT_DATABASE_URL: &str = "sqlite://pi-auto-feeder.sqlite3";
 
 #[derive(Clone)]
+/// SQLite 接続プールと、SSE に橋渡しするプロセス内変更通知を共有する。
 pub struct ScheduleStore {
     pub(super) pool: SqlitePool,
     changes: broadcast::Sender<()>,
 }
 
 impl ScheduleStore {
+    /// `DATABASE_URL`、または既定のローカル DB を開いて移行する。
     pub async fn from_env() -> Result<Self> {
         let database_url =
             env::var("DATABASE_URL").unwrap_or_else(|_| DEFAULT_DATABASE_URL.to_owned());
         Self::connect(&database_url).await
     }
 
+    /// 指定 URL の SQLite DB を WAL モードで開き、利用前にスキーマを移行する。
     pub(crate) async fn connect(database_url: &str) -> Result<Self> {
         let options = SqliteConnectOptions::from_str(database_url)
             .wrap_err("DATABASE_URL must be a valid SQLite URL")?
@@ -40,6 +45,7 @@ impl ScheduleStore {
         Ok(Self { pool, changes })
     }
 
+    /// 旧形式、期限切れ、失敗済みを含む全スケジュールを表示順で取得する。
     pub async fn list(&self) -> Result<Vec<Schedule>> {
         let rows = sqlx::query(
             "SELECT id,
@@ -68,8 +74,10 @@ impl ScheduleStore {
             .collect()
     }
 
+    /// 書式が正しく、DB のローカル現在時刻より未来にある予定だけを追加する。
     pub async fn add(&self, scheduled_at: &str) -> Result<Schedule> {
         validate_scheduled_at(scheduled_at)?;
+        // 検証と INSERT を同じ SQL 文にし、時刻が進む間の競合を避ける。
         let row = sqlx::query(
             "INSERT INTO schedules (scheduled_at)
              SELECT ?1
@@ -90,6 +98,7 @@ impl ScheduleStore {
         Ok(schedule)
     }
 
+    /// ID が一致するスケジュールを削除する。
     pub async fn delete(&self, id: i64) -> Result<()> {
         sqlx::query("DELETE FROM schedules WHERE id = ?1")
             .bind(id)
@@ -99,6 +108,7 @@ impl ScheduleStore {
         Ok(())
     }
 
+    /// 最終給餌時刻と履歴を同じトランザクションで更新する。
     pub async fn record_feed(&self) -> Result<String> {
         let mut transaction = self.pool.begin().await?;
         sqlx::query(
@@ -120,6 +130,7 @@ impl ScheduleStore {
         Ok(fed_at)
     }
 
+    /// 新しい順に最大 10 件の給餌履歴を取得する。
     pub async fn recent_feed_history(&self) -> Result<Vec<String>> {
         sqlx::query_scalar("SELECT fed_at FROM feed_history ORDER BY id DESC LIMIT 10")
             .fetch_all(&self.pool)
@@ -127,6 +138,7 @@ impl ScheduleStore {
             .map_err(Into::into)
     }
 
+    /// 保存値を符号なし整数へ変換し、許容範囲を再検証して返す。
     pub async fn settings(&self) -> Result<Settings> {
         let (cooldown_seconds, feed_duration_ms): (i64, i64) =
             sqlx::query_as("SELECT cooldown_seconds, feed_duration_ms FROM settings WHERE id = 1")
@@ -144,6 +156,7 @@ impl ScheduleStore {
         Ok(settings)
     }
 
+    /// 許容範囲内の給餌設定を単一行へ保存する。
     pub async fn update_settings(&self, settings: &Settings) -> Result<()> {
         validate_settings(settings)?;
         let cooldown_seconds = settings.cooldown_seconds as i64;
@@ -159,6 +172,7 @@ impl ScheduleStore {
         Ok(())
     }
 
+    /// DB のローカル現在時刻を基準にクールタイムの残り秒数を求める。
     pub async fn cooldown_remaining(&self) -> Result<u64> {
         let remaining: i64 = sqlx::query_scalar(
             "SELECT CASE WHEN feeder_status.last_feed_at IS NULL THEN 0 ELSE MAX(
@@ -174,6 +188,7 @@ impl ScheduleStore {
         u64::try_from(remaining).wrap_err("calculated cooldown must not be negative")
     }
 
+    /// 永続状態が変わったことを受け取る新しい購読者を作る。
     pub fn subscribe(&self) -> broadcast::Receiver<()> {
         self.changes.subscribe()
     }
@@ -183,6 +198,7 @@ impl ScheduleStore {
         self.pool.close().await;
     }
 
+    /// サーバの現在時刻と最後の給餌成功時刻を同じ問い合わせで取得する。
     pub async fn status(&self) -> Result<ServerStatus> {
         let (current_time, last_feed_time): (String, Option<String>) = sqlx::query_as(
             "SELECT strftime('%Y-%m-%d %H:%M:%S', 'now', 'localtime') AS current_time,
@@ -198,7 +214,9 @@ impl ScheduleStore {
         })
     }
 
+    /// 現在の分に一致する未処理予定を一件だけ原子的に実行中へ変更する。
     pub(super) async fn claim_due_schedule(&self) -> Result<Option<Schedule>> {
+        // 先に失敗理由を仮記録し、実行中のプロセスが落ちても再起動後に二重給餌しない。
         let row: Option<(i64, Option<String>)> = sqlx::query_as(
             "UPDATE schedules
              SET failure_reason = '給餌処理を開始しましたが，完了を確認できていません'
@@ -222,6 +240,7 @@ impl ScheduleStore {
         }))
     }
 
+    /// 成功した一回限りの予定を消費して削除する。
     pub(super) async fn complete_scheduled_feed(&self, id: i64) -> Result<()> {
         sqlx::query("DELETE FROM schedules WHERE id = ?1")
             .bind(id)
@@ -231,6 +250,7 @@ impl ScheduleStore {
         Ok(())
     }
 
+    /// 再実行しない予定として利用者向けの失敗理由を保存する。
     pub(super) async fn fail_schedule(&self, id: i64, reason: &str) -> Result<()> {
         sqlx::query("UPDATE schedules SET failure_reason = ?1 WHERE id = ?2")
             .bind(reason)
@@ -241,17 +261,20 @@ impl ScheduleStore {
         Ok(())
     }
 
+    /// SSE 側は最新状態を再取得するだけなので、受信者不在や通知破棄は無視する。
     fn notify(&self) {
         let _ = self.changes.send(());
     }
 }
 
+/// `datetime-local` が送る分精度の日時書式と実在日時を検証する。
 fn validate_scheduled_at(value: &str) -> Result<()> {
     NaiveDateTime::parse_from_str(value, "%Y-%m-%dT%H:%M")
         .wrap_err("schedule must contain a valid date and time in YYYY-MM-DDTHH:MM format")?;
     Ok(())
 }
 
+/// UI の属性値に依存せず、永続化境界で設定範囲を保証する。
 fn validate_settings(settings: &Settings) -> Result<()> {
     if settings.cooldown_seconds > MAX_COOLDOWN_SECONDS
         || !(MIN_FEED_DURATION_MS..=MAX_FEED_DURATION_MS).contains(&settings.feed_duration_ms)

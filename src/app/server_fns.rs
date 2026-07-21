@@ -1,13 +1,19 @@
+//! UI から呼び出す Leptos server functions。
+//!
+//! 読み書きはすべてサーバ側のサービスへ委譲し、ブラウザへ内部エラーの詳細を返さない。
+
 use super::model::{InitialState, ScheduleView, SettingsView};
 use leptos::prelude::*;
 
 #[cfg(feature = "ssr")]
+/// 運用ログには原因を残しつつ、レスポンスでは一定のエラー文へ変換する。
 fn internal_error(operation: &str, error: impl std::fmt::Display) -> ServerFnError {
     eprintln!("{operation}: {error}");
     ServerFnError::new("サーバー処理に失敗しました")
 }
 
 #[server]
+/// トップ画面で互いに整合している必要がある表示データをまとめて取得する。
 pub async fn load_initial_state() -> Result<InitialState, ServerFnError> {
     use crate::schedule::ScheduleStore;
     let store = expect_context::<ScheduleStore>();
@@ -38,6 +44,7 @@ pub async fn load_initial_state() -> Result<InitialState, ServerFnError> {
 }
 
 #[server]
+/// 現在の給餌設定を取得する。
 pub async fn load_settings() -> Result<SettingsView, ServerFnError> {
     use crate::schedule::ScheduleStore;
     let settings = expect_context::<ScheduleStore>()
@@ -51,6 +58,7 @@ pub async fn load_settings() -> Result<SettingsView, ServerFnError> {
 }
 
 #[server]
+/// 共通の給餌サービスを通して手動給餌を実行する。
 pub async fn feed_now() -> Result<String, ServerFnError> {
     use crate::feed::{FeedOutcome, FeedService};
     match expect_context::<FeedService>()
@@ -66,6 +74,7 @@ pub async fn feed_now() -> Result<String, ServerFnError> {
 }
 
 #[server]
+/// サーバのローカル日時として一回限りのスケジュールを登録する。
 pub async fn add_schedule(scheduled_at: String) -> Result<ScheduleView, ServerFnError> {
     use crate::schedule::ScheduleStore;
     expect_context::<ScheduleStore>()
@@ -76,6 +85,7 @@ pub async fn add_schedule(scheduled_at: String) -> Result<ScheduleView, ServerFn
 }
 
 #[server]
+/// 指定したスケジュールを削除し、フォーム側へ同じ ID を返す。
 pub async fn delete_schedule(id: i64) -> Result<i64, ServerFnError> {
     use crate::schedule::ScheduleStore;
     expect_context::<ScheduleStore>()
@@ -86,6 +96,7 @@ pub async fn delete_schedule(id: i64) -> Result<i64, ServerFnError> {
 }
 
 #[server]
+/// サーバ側の範囲検証を通して給餌設定を保存する。
 pub async fn save_settings(
     cooldown_seconds: u64,
     feed_duration_ms: u64,

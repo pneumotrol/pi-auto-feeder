@@ -1,9 +1,12 @@
+//! 既存データを保持したまま SQLite スキーマを現行形式へ移行する。
+
 use super::{DEFAULT_COOLDOWN_SECONDS, DEFAULT_FEED_DURATION_MS};
 use color_eyre::eyre::{Result, WrapErr, bail};
 use sqlx::{Executor, Row, Sqlite, Transaction};
 
 const SCHEMA_VERSION: i64 = 1;
 
+/// 対応外の新しい DB を拒否し、すべての移行を一つのトランザクションで適用する。
 pub(super) async fn migrate(pool: &sqlx::SqlitePool) -> Result<()> {
     let current_version: i64 = sqlx::query_scalar("PRAGMA user_version")
         .fetch_one(pool)
@@ -52,6 +55,7 @@ async fn migrate_schedules(transaction: &mut Transaction<'_, Sqlite>) -> Result<
     let has = |name: &str| columns.iter().any(|column| column == name);
 
     if has("time") && !has("scheduled_at") {
+        // 時刻だけの旧データへ日付を推測で補わず、非実行の legacy_time として保存する。
         transaction
             .execute("ALTER TABLE schedules RENAME TO schedules_time_only")
             .await?;
@@ -68,6 +72,7 @@ async fn migrate_schedules(transaction: &mut Transaction<'_, Sqlite>) -> Result<
         return Ok(());
     }
 
+    // 未知の形を無理に変換するとデータを失うため、必須列がなければ明示的に停止する。
     if !has("scheduled_at") {
         bail!("unsupported schedules table: scheduled_at column is missing");
     }
@@ -84,6 +89,7 @@ async fn migrate_schedules(transaction: &mut Transaction<'_, Sqlite>) -> Result<
     Ok(())
 }
 
+/// 現行形式のスケジュールテーブルを新規作成する。
 async fn create_schedules_table(transaction: &mut Transaction<'_, Sqlite>) -> Result<()> {
     transaction
         .execute(
@@ -98,6 +104,7 @@ async fn create_schedules_table(transaction: &mut Transaction<'_, Sqlite>) -> Re
     Ok(())
 }
 
+/// 単一行の状態・設定テーブルと追記型の履歴テーブルを不足時だけ作成する。
 async fn create_supporting_tables(transaction: &mut Transaction<'_, Sqlite>) -> Result<()> {
     transaction
         .execute(

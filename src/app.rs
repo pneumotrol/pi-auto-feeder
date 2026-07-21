@@ -1,3 +1,5 @@
+//! SSR とハイドレーションで共有する Leptos アプリのルート構成。
+
 mod home;
 #[cfg(feature = "hydrate")]
 mod live_sync;
@@ -15,6 +17,7 @@ use leptos_router::{
 };
 use settings::SettingsRoute;
 
+/// Leptos のメタ情報とハイドレーション資産を含む HTML 文書全体を描画する。
 pub fn shell(options: LeptosOptions) -> impl IntoView {
     view! {
         <!DOCTYPE html>
@@ -34,6 +37,7 @@ pub fn shell(options: LeptosOptions) -> impl IntoView {
 }
 
 #[component]
+/// トップ画面と設定画面を持つアプリケーションルータ。
 pub fn App() -> impl IntoView {
     provide_meta_context();
     view! {

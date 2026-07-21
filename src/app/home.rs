@@ -1,3 +1,5 @@
+//! カメラ、手動給餌、スケジュール、サーバ状態をまとめたトップ画面。
+
 use super::{
     model::{InitialState, ScheduleView},
     server_fns::{AddSchedule, DeleteSchedule, FeedNow, load_initial_state},
@@ -5,9 +7,11 @@ use super::{
 use leptos::{form::ActionForm, prelude::*};
 use leptos_router::components::A;
 
+/// SSE や操作成功後にトップ画面のスナップショットを再取得するアクション型。
 pub(super) type RefreshAction = Action<(), Result<InitialState, ServerFnError>>;
 
 #[component]
+/// 初期状態を SSR 時にも取得し、読み込み状態を含めてトップ画面を描画する。
 pub(super) fn HomePage() -> impl IntoView {
     let state = Resource::new(|| (), |_| load_initial_state());
     view! {
@@ -36,6 +40,7 @@ pub(super) fn HomePage() -> impl IntoView {
 }
 
 #[component]
+/// 初期スナップショットをリアクティブな画面状態へ展開するトップ画面本体。
 fn Home(state: InitialState) -> impl IntoView {
     let schedules = RwSignal::new(state.schedules);
     let server_time_base = RwSignal::new(state.current_server_time.clone());
@@ -61,6 +66,7 @@ fn Home(state: InitialState) -> impl IntoView {
     let delete = ServerAction::<DeleteSchedule>::new();
     let add = ServerAction::<AddSchedule>::new();
 
+    // すべての更新経路を同じ再取得処理へ合流させ、部分的な楽観更新を避ける。
     synchronize_state(refresh, signals);
     refresh_after_success(feed, refresh);
     refresh_after_success(delete, refresh);
@@ -213,6 +219,7 @@ where
     S: server_fn::ServerFn<Error = ServerFnError> + Clone + Send + Sync + 'static,
     S::Output: Clone + Send + Sync + 'static,
 {
+    // ActionForm の通常送信はそのまま遷移し、ハイドレーション後だけこの Effect が働く。
     Effect::new(move |_| {
         if matches!(action.value().get(), Some(Ok(_))) {
             refresh.dispatch(());
@@ -220,6 +227,7 @@ where
     });
 }
 
+/// 再取得に成功した場合だけ、関連する全シグナルを同じスナップショットで置き換える。
 fn synchronize_state(refresh: RefreshAction, signals: HomeSignals) {
     Effect::new(move |_| {
         let Some(Ok(state)) = refresh.value().get() else {
@@ -230,6 +238,7 @@ fn synchronize_state(refresh: RefreshAction, signals: HomeSignals) {
 }
 
 #[component]
+/// 新形式・旧形式・失敗済みを区別して一件のスケジュールを表示する。
 fn ScheduleItem(schedule: ScheduleView, delete: ServerAction<DeleteSchedule>) -> impl IntoView {
     let id = schedule.id;
     let failed = schedule.missed || schedule.failure_reason.is_some();
@@ -282,6 +291,7 @@ fn ScheduleItem(schedule: ScheduleView, delete: ServerAction<DeleteSchedule>) ->
 }
 
 #[derive(Clone, Copy)]
+/// SSE 再同期とローカル補間で共有するトップ画面のリアクティブ状態。
 pub(super) struct HomeSignals {
     pub(super) schedules: RwSignal<Vec<ScheduleView>>,
     pub(super) server_time_base: RwSignal<String>,
@@ -294,6 +304,7 @@ pub(super) struct HomeSignals {
 }
 
 impl HomeSignals {
+    /// サーバのスナップショットを適用し、補間時計の基準時刻も同時にリセットする。
     fn apply(self, state: InitialState) {
         self.schedules.set(state.schedules);
         self.server_time_base.set(state.current_server_time.clone());
@@ -306,6 +317,7 @@ impl HomeSignals {
     }
 }
 
+/// SSR ではゼロ、ブラウザではページ内の単調増加時刻を返す。
 fn performance_now() -> f64 {
     #[cfg(feature = "hydrate")]
     {

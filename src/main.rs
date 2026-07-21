@@ -1,3 +1,5 @@
+//! SSR サーバの構築、バックグラウンド処理の起動、正常終了を担当するバイナリ。
+
 #[cfg(feature = "ssr")]
 #[tokio::main]
 async fn main() -> color_eyre::Result<()> {
@@ -20,6 +22,7 @@ async fn main() -> color_eyre::Result<()> {
     println!("Feeder mode: {}", feeder.mode());
     println!("Camera mode: {}", camera.mode());
 
+    // 手動給餌とスケジュール給餌で同じサービスを共有し、排他制御を一か所に集約する。
     let feed_service = FeedService::new(feeder, schedules.clone());
     let cancellation = CancellationToken::new();
     let scheduler = schedule::start_scheduler(
@@ -35,6 +38,7 @@ async fn main() -> color_eyre::Result<()> {
     let context_store = schedules.clone();
     let context_feed_service = feed_service.clone();
 
+    // 専用ストリームのルートを先に結合し、残りを Leptos の SSR ルートへ委譲する。
     let app = Router::<LeptosOptions>::new()
         .merge(events::router(schedules))
         .merge(camera::router(camera))
@@ -59,6 +63,7 @@ async fn main() -> color_eyre::Result<()> {
     let server_result = axum::serve(listener, app.into_make_service())
         .with_graceful_shutdown(shutdown_signal(cancellation.clone()))
         .await;
+    // サーバ停止と同時にスケジューラを止め、タスクの終了を待ってからプロセスを抜ける。
     cancellation.cancel();
     scheduler.await?;
     server_result?;
@@ -66,6 +71,7 @@ async fn main() -> color_eyre::Result<()> {
 }
 
 #[cfg(feature = "ssr")]
+/// Ctrl+C またはサービスマネージャからの SIGTERM を待ち、全タスクへ停止を通知する。
 async fn shutdown_signal(cancellation: tokio_util::sync::CancellationToken) {
     #[cfg(unix)]
     {
@@ -96,6 +102,7 @@ async fn shutdown_signal(cancellation: tokio_util::sync::CancellationToken) {
 }
 
 #[cfg(feature = "ssr")]
+/// 状態変更リクエストを同一オリジンに限定するための Axum ミドルウェア。
 async fn require_same_origin(
     request: axum::extract::Request,
     next: axum::middleware::Next,
@@ -116,6 +123,9 @@ async fn require_same_origin(
 }
 
 #[cfg(feature = "ssr")]
+/// `Origin` の authority とリバースプロキシから渡る `Host` が一致するかを調べる。
+///
+/// 通常の HTML フォーム送信では `Origin` が付かない場合があるため、その場合は許可する。
 fn has_same_origin(headers: &axum::http::HeaderMap) -> bool {
     use axum::http::header;
 
@@ -172,4 +182,5 @@ mod tests {
 }
 
 #[cfg(not(feature = "ssr"))]
+/// Wasm ライブラリのビルド時にバイナリ側へサーバ依存を持ち込まないための空エントリ。
 pub fn main() {}
