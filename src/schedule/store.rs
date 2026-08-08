@@ -50,14 +50,13 @@ impl ScheduleStore {
         let rows = sqlx::query(
             "SELECT id,
                     scheduled_at,
-                    legacy_time,
                     failure_reason,
                     COALESCE(
                         scheduled_at < strftime('%Y-%m-%dT%H:%M', 'now', 'localtime'),
                         0
                     ) AS missed
              FROM schedules
-             ORDER BY scheduled_at IS NOT NULL, scheduled_at",
+             ORDER BY scheduled_at",
         )
         .fetch_all(&self.pool)
         .await?;
@@ -66,7 +65,6 @@ impl ScheduleStore {
                 Ok(Schedule {
                     id: row.try_get("id")?,
                     scheduled_at: row.try_get("scheduled_at")?,
-                    legacy_time: row.try_get("legacy_time")?,
                     missed: row.try_get::<i64, _>("missed")? != 0,
                     failure_reason: row.try_get("failure_reason")?,
                 })
@@ -90,7 +88,6 @@ impl ScheduleStore {
         let schedule = Schedule {
             id: row.try_get("id")?,
             scheduled_at: row.try_get("scheduled_at")?,
-            legacy_time: None,
             missed: false,
             failure_reason: None,
         };
@@ -109,7 +106,7 @@ impl ScheduleStore {
     }
 
     /// 最終給餌時刻と履歴を同じトランザクションで更新する。
-    pub async fn record_feed(&self) -> Result<String> {
+    pub async fn record_feed(&self) -> Result<()> {
         let mut transaction = self.pool.begin().await?;
         sqlx::query(
             "UPDATE feeder_status
@@ -118,16 +115,15 @@ impl ScheduleStore {
         )
         .execute(&mut *transaction)
         .await?;
-        let fed_at: String = sqlx::query_scalar(
+        sqlx::query(
             "INSERT INTO feed_history (fed_at)
-             VALUES (strftime('%Y-%m-%d %H:%M:%S', 'now', 'localtime'))
-             RETURNING fed_at",
+             VALUES (strftime('%Y-%m-%d %H:%M:%S', 'now', 'localtime'))",
         )
-        .fetch_one(&mut *transaction)
+        .execute(&mut *transaction)
         .await?;
         transaction.commit().await?;
         self.notify();
-        Ok(fed_at)
+        Ok(())
     }
 
     /// 新しい順に最大 10 件の給餌履歴を取得する。
@@ -217,7 +213,7 @@ impl ScheduleStore {
     /// 現在の分に一致する未処理予定を一件だけ原子的に実行中へ変更する。
     pub(super) async fn claim_due_schedule(&self) -> Result<Option<Schedule>> {
         // 先に失敗理由を仮記録し、実行中のプロセスが落ちても再起動後に二重給餌しない。
-        let row: Option<(i64, Option<String>)> = sqlx::query_as(
+        let row: Option<(i64, String)> = sqlx::query_as(
             "UPDATE schedules
              SET failure_reason = '給餌処理を開始しましたが，完了を確認できていません'
              WHERE id = (
@@ -234,7 +230,6 @@ impl ScheduleStore {
         Ok(row.map(|(id, scheduled_at)| Schedule {
             id,
             scheduled_at,
-            legacy_time: None,
             missed: false,
             failure_reason: None,
         }))
@@ -288,11 +283,7 @@ fn validate_settings(settings: &Settings) -> Result<()> {
 mod tests {
     use super::*;
     use crate::schedule::{DEFAULT_COOLDOWN_SECONDS, DEFAULT_FEED_DURATION_MS};
-    use sqlx::{Executor, sqlite::SqliteConnectOptions};
-    use std::{
-        str::FromStr,
-        sync::atomic::{AtomicU64, Ordering},
-    };
+    use std::sync::atomic::{AtomicU64, Ordering};
 
     static NEXT_DATABASE_ID: AtomicU64 = AtomicU64::new(0);
 
@@ -332,39 +323,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn migrates_time_only_schedules_without_assigning_a_date() {
-        let (url, path) = database_url("migration");
-        let options = SqliteConnectOptions::from_str(&url)
-            .unwrap()
-            .create_if_missing(true);
-        let pool = SqlitePool::connect_with(options).await.unwrap();
-        pool.execute(
-            "CREATE TABLE schedules (
-                id INTEGER PRIMARY KEY,
-                time TEXT NOT NULL UNIQUE,
-                last_run_date TEXT
-            )",
-        )
-        .await
-        .unwrap();
-        pool.execute("INSERT INTO schedules (id, time) VALUES (42, '07:30')")
-            .await
-            .unwrap();
-        pool.close().await;
-
-        let store = ScheduleStore::connect(&url).await.unwrap();
-        let schedules = store.list().await.unwrap();
-        assert_eq!(schedules.len(), 1);
-        assert_eq!(schedules[0].id, 42);
-        assert_eq!(schedules[0].scheduled_at, None);
-        assert_eq!(schedules[0].legacy_time.as_deref(), Some("07:30"));
-        assert!(!schedules[0].missed);
-
-        store.pool.close().await;
-        tokio::fs::remove_file(path).await.unwrap();
-    }
-
-    #[tokio::test]
     async fn validates_settings_and_limits_feed_history() {
         let (url, path) = database_url("settings");
         let store = ScheduleStore::connect(&url).await.unwrap();
@@ -398,7 +356,7 @@ mod tests {
                 .unwrap();
 
         let added = store.add(&future).await.unwrap();
-        assert_eq!(added.scheduled_at.as_deref(), Some(future.as_str()));
+        assert_eq!(added.scheduled_at, future);
         assert!(store.add(&future).await.is_err());
         assert!(store.add("2000-01-01T00:00").await.is_err());
         assert_eq!(store.list().await.unwrap().len(), 1);
@@ -420,7 +378,7 @@ mod tests {
         .unwrap();
 
         let claimed = store.claim_due_schedule().await.unwrap().unwrap();
-        assert!(claimed.scheduled_at.is_some());
+        assert!(!claimed.scheduled_at.is_empty());
         assert!(store.claim_due_schedule().await.unwrap().is_none());
         assert!(store.list().await.unwrap()[0].failure_reason.is_some());
 

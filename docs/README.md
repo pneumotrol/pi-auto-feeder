@@ -19,7 +19,7 @@ Pi Auto Feeder は、Raspberry Pi 4 に接続したサーボ式給餌器と Web 
 
 手動給餌と予定給餌は同じ `FeedService` を通る．サービスは mutex で物理操作を直列化し、ロック取得後に SQLite 上の最終成功時刻と設定からクールタイムを確認する．サーボ操作に成功した場合だけ、最終給餌時刻と履歴を 1 トランザクションで記録する．
 
-予定は `YYYY-MM-DDTHH:MM` の分精度で保存される．スケジューラは起動直後と 30 秒ごとに現在の分と一致する予定を確保し、二重実行を避けるため実行前に暫定失敗状態を保存する．成功時は予定を削除し、クールタイム中や成否不明の場合は理由付きで残す．停止中に時刻を過ぎた予定と、旧 DB から移行した時刻のみの予定は実行しない．
+予定は `YYYY-MM-DDTHH:MM` の分精度で保存される．スケジューラは起動直後と 30 秒ごとに現在の分と一致する予定を確保し、二重実行を避けるため実行前に暫定失敗状態を保存する．成功時は予定を削除し、クールタイム中や成否不明の場合は理由付きで残す．停止中に時刻を過ぎた予定は実行しない．
 
 ## 構成
 
@@ -36,7 +36,7 @@ src/
 ├── events.rs                SSE endpoint
 ├── schedule.rs              schedule ドメイン型と設定範囲
 └── schedule/
-    ├── migration.rs         SQLite schema version 1 の移行
+    ├── migration.rs         SQLite schema version 1 の初期化
     ├── scheduler.rs         30 秒周期の予定実行
     └── store.rs             SQLite 永続化と変更通知
 
@@ -61,7 +61,7 @@ FEEDER_MOCK=true CAMERA_MOCK=true DATABASE_URL=sqlite:///tmp/pi-auto-feeder-dev.
   topcoat dev
 ```
 
-既定では `http://127.0.0.1:3000` で待ち受ける．別ポートを使う場合は `PORT`、別アドレスを使う場合は `HOST` を設定する．`LEPTOS_SITE_ADDR` も旧配置との互換性のため受理するが、新しい設定では使用しない．
+既定では `http://127.0.0.1:3000` で待ち受ける．別ポートを使う場合は `PORT`、別アドレスを使う場合は `HOST` を設定する．
 
 モックモードでは手動・予定給餌は GPIO を操作せず成功履歴を記録し、カメラ route は固定 SVG を返す．DB は指定したパスへ新規作成され、WAL モードで使用される．
 
@@ -74,7 +74,6 @@ FEEDER_MOCK=true CAMERA_MOCK=true DATABASE_URL=sqlite:///tmp/pi-auto-feeder-dev.
 | `CAMERA_MOCK`      | `false`                           | `true` なら固定 SVG を返す                                     |
 | `HOST`             | `127.0.0.1`                       | 待受ホスト                                                     |
 | `PORT`             | `3000`                            | 待受ポート                                                     |
-| `LEPTOS_SITE_ADDR` | 未設定                            | 旧設定用の完全な SocketAddr。設定時は `HOST` / `PORT` より優先 |
 
 アプリ画面から保存する給餌設定は SQLite に保持される．
 
@@ -98,14 +97,14 @@ FEEDER_MOCK=true CAMERA_MOCK=true DATABASE_URL=sqlite:///tmp/pi-auto-feeder-dev.
 
 ## DB
 
-SQLite schema version は 1 である．起動時に次のテーブルを作成または移行する．
+SQLite schema version は 1 である．新規 DB の初回起動時に次のテーブルを作成する．
 
-- `schedules`: `scheduled_at`、`legacy_time`、`failure_reason` を持つ予定
+- `schedules`: 必須の `scheduled_at` と任意の `failure_reason` を持つ予定
 - `feeder_status`: 最終給餌時刻を持つ単一行
 - `feed_history`: 成功した給餌の追記履歴
 - `settings`: クールタイムと駆動時間を持つ単一行
 
-旧 `schedules(time, last_run_date)` の時刻は日付を推測せず `legacy_time` へ保存する．未知の schedules 形式や version 1 より新しい DB は自動変換せず、起動を停止する．実 DB を更新する前は [`release.md`](release.md) の手順でバックアップする．
+新規 DB はトランザクション内で schema version 1 に初期化する．version 1 以外の既存 DB は自動変換せず、起動を停止する．実 DB を更新する前は [`release.md`](release.md) の手順でバックアップする．
 
 ## 検証
 
@@ -120,7 +119,7 @@ cargo build --release
 topcoat asset bundle --release
 ```
 
-UI 変更では htmx、SSE、JavaScript 無効時の 303 redirect を確認する．給餌・DB・スケジューラ変更では、物理失敗、クールタイム、重複、期限切れ、処理中断、旧 DB 移行を含めて確認する．
+UI 変更では htmx、SSE、JavaScript 無効時の 303 redirect を確認する．給餌・DB・スケジューラ変更では、物理失敗、クールタイム、重複、期限切れ、処理中断、スキーマバージョン不一致を含めて確認する．
 
 ## 実機運用上の注意
 

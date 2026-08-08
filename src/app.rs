@@ -214,25 +214,13 @@ async fn schedule_item(schedule: &Schedule) -> Result {
     view! {
         <li>
             <div>
-                if let Some(scheduled_at) = &schedule.scheduled_at {
-                    <time datetime=(scheduled_at)>
-                        (scheduled_at.replace('T', " "))
-                    </time>
-                    if failed {
-                        <p class="error">
-                            <strong>"給餌失敗: "</strong>
-                            (failure_reason)
-                        </p>
-                    }
-                } else {
-                    <p>
-                        <strong>"日時未設定"</strong>
-                        if let Some(legacy_time) = &schedule.legacy_time {
-                            "（旧設定時刻 "
-                            (legacy_time)
-                            "）"
-                        }
-                        " — 削除して再登録してください"
+                <time datetime=(&schedule.scheduled_at)>
+                    (schedule.scheduled_at.replace('T', " "))
+                </time>
+                if failed {
+                    <p class="error">
+                        <strong>"給餌失敗: "</strong>
+                        (failure_reason)
                     </p>
                 }
             </div>
@@ -330,7 +318,7 @@ struct SaveSettings {
 #[route(POST "/feed")]
 async fn feed(cx: &Cx) -> Result<Response> {
     let location = match feed_service(cx).feed().await {
-        Ok(FeedOutcome::Fed(_)) => "/?notice=fed".to_owned(),
+        Ok(FeedOutcome::Fed) => "/?notice=fed".to_owned(),
         Ok(FeedOutcome::Cooldown(remaining)) => {
             format!("/?notice=cooldown&remaining={remaining}")
         }

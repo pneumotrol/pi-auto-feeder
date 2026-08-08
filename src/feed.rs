@@ -44,8 +44,8 @@ pub struct FeedService {
 
 /// 給餌要求が物理操作まで進んだか、クールタイムで抑止されたかを表す。
 pub enum FeedOutcome {
-    /// 給餌に成功した時刻。サーバのローカル日時で表す。
-    Fed(String),
+    /// 給餌と履歴記録が成功した。
+    Fed,
     /// 給餌可能になるまでの残り秒数。
     Cooldown(u64),
 }
@@ -71,12 +71,11 @@ impl FeedService {
         let settings = self.store.settings().await?;
         self.feeder.feed(settings.feed_duration_ms).await?;
         // 物理操作後の記録失敗は再試行すると二重給餌になるため、文脈付きエラーとして返す。
-        let fed_at = self
-            .store
+        self.store
             .record_feed()
             .await
             .wrap_err("physical feed succeeded but its history could not be recorded")?;
-        Ok(FeedOutcome::Fed(fed_at))
+        Ok(FeedOutcome::Fed)
     }
 }
 
@@ -178,7 +177,7 @@ mod tests {
     async fn successful_feed_is_recorded_and_starts_cooldown() {
         let (service, path) = service(FeederBackend::Mock).await;
 
-        assert!(matches!(service.feed().await.unwrap(), FeedOutcome::Fed(_)));
+        assert!(matches!(service.feed().await.unwrap(), FeedOutcome::Fed));
         assert!(matches!(
             service.feed().await.unwrap(),
             FeedOutcome::Cooldown(1..)
@@ -216,7 +215,7 @@ mod tests {
         assert_eq!(
             outcomes
                 .iter()
-                .filter(|outcome| matches!(outcome, FeedOutcome::Fed(_)))
+                .filter(|outcome| matches!(outcome, FeedOutcome::Fed))
                 .count(),
             1
         );

@@ -28,13 +28,10 @@ pub fn start_scheduler(
 async fn run_due_schedule(store: &ScheduleStore, feeder: &FeedService) {
     match store.claim_due_schedule().await {
         Ok(Some(schedule)) => {
-            println!(
-                "Running scheduled feed at {}",
-                schedule.scheduled_at.as_deref().unwrap_or("unknown")
-            );
+            println!("Running scheduled feed at {}", schedule.scheduled_at);
             // 手動給餌と同じサービスを使うため、同時実行とクールタイムも共通に判定される。
             match feeder.feed().await {
-                Ok(FeedOutcome::Fed(_)) => {
+                Ok(FeedOutcome::Fed) => {
                     if let Err(error) = store.complete_scheduled_feed(schedule.id).await {
                         eprintln!("Failed to consume feed schedule: {error}");
                     }

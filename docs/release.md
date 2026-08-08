@@ -98,16 +98,16 @@ sudo tailscale serve status
 
 Tailscale Serve は HTTPS を終端し、ループバックのポート 3000 へ転送する．表示された `https://<device>.<tailnet>.ts.net/` を tailnet 内の許可ユーザから開く．既存の Serve 設定がある場合は、上書き前に `tailscale serve status` で影響範囲を確認する．
 
-## DB 移行
+## DB 初期化
 
-アプリは DB を開くたびに、全移行を 1 トランザクションで適用して `PRAGMA user_version = 1` にする．
+アプリは新規 DB を開くと、1 トランザクションで全テーブルを作成して `PRAGMA user_version = 1` にする．
 
 - 新規 DB には `schedules`、`feeder_status`、`feed_history`、`settings` を作成する．
-- 旧 `schedules(time, last_run_date)` の行は ID と時刻を保持したまま `legacy_time` へ移し、日付未設定として自動実行しない．
-- `scheduled_at` を持つ旧テーブルには不足している `legacy_time` と `failure_reason` を追加する．
-- 必須列のない未知の形式、または実装より新しい schema version は起動エラーにしてデータを保護する．
+- `schedules.scheduled_at` は `NOT NULL UNIQUE` とし、日時未設定や重複を許可しない．
+- schema version 1 の DB は変更せず開く．
+- version 0 の既存スキーマや、実装より新しい schema version は自動変換せず起動エラーにする．
 
-初回起動後にログと画面を確認し、旧時刻形式の予定は必要に応じて削除し、未来の日時で再登録する．
+初回起動後にログと画面を確認し、DB の初期化に失敗していないことを確認する．
 
 ## リリース後確認
 

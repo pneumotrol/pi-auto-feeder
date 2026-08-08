@@ -1,12 +1,12 @@
-//! 既存データを保持したまま SQLite スキーマを現行形式へ移行する。
+//! SQLite スキーマを初期化し、対応するバージョンだけを開く。
 
 use super::{DEFAULT_COOLDOWN_SECONDS, DEFAULT_FEED_DURATION_MS};
 use color_eyre::eyre::{Result, WrapErr, bail};
-use sqlx::{Executor, Row, Sqlite, Transaction};
+use sqlx::{Executor, Sqlite, Transaction};
 
 const SCHEMA_VERSION: i64 = 1;
 
-/// 対応外の新しい DB を拒否し、すべての移行を一つのトランザクションで適用する。
+/// 新規 DB に現行スキーマを作成し、対応外の DB は変更せず拒否する。
 pub(super) async fn migrate(pool: &sqlx::SqlitePool) -> Result<()> {
     let current_version: i64 = sqlx::query_scalar("PRAGMA user_version")
         .fetch_one(pool)
@@ -16,110 +16,58 @@ pub(super) async fn migrate(pool: &sqlx::SqlitePool) -> Result<()> {
             "database schema version {current_version} is newer than supported version {SCHEMA_VERSION}"
         );
     }
+    if current_version == SCHEMA_VERSION {
+        return Ok(());
+    }
+
     let mut transaction = pool
         .begin()
         .await
-        .wrap_err("failed to begin database migration")?;
-
-    migrate_schedules(&mut transaction).await?;
-    create_supporting_tables(&mut transaction).await?;
+        .wrap_err("failed to begin database initialization")?;
+    let table_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM sqlite_master
+         WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",
+    )
+    .fetch_one(&mut *transaction)
+    .await?;
+    if table_count > 0 {
+        bail!("unversioned existing database is not supported");
+    }
+    create_schema(&mut transaction).await?;
     transaction
         .execute(format!("PRAGMA user_version = {SCHEMA_VERSION}").as_str())
         .await?;
     transaction
         .commit()
         .await
-        .wrap_err("failed to commit database migration")?;
+        .wrap_err("failed to commit database initialization")?;
     Ok(())
 }
 
-async fn migrate_schedules(transaction: &mut Transaction<'_, Sqlite>) -> Result<()> {
-    let exists: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'schedules'",
-    )
-    .fetch_one(&mut **transaction)
-    .await?;
-
-    if exists == 0 {
-        create_schedules_table(transaction).await?;
-        return Ok(());
-    }
-
-    let rows = sqlx::query("PRAGMA table_info(schedules)")
-        .fetch_all(&mut **transaction)
-        .await?;
-    let mut columns = Vec::with_capacity(rows.len());
-    for row in rows {
-        columns.push(row.try_get::<String, _>("name")?);
-    }
-    let has = |name: &str| columns.iter().any(|column| column == name);
-
-    if has("time") && !has("scheduled_at") {
-        // 時刻だけの旧データへ日付を推測で補わず、非実行の legacy_time として保存する。
-        transaction
-            .execute("ALTER TABLE schedules RENAME TO schedules_time_only")
-            .await?;
-        create_schedules_table(transaction).await?;
-        transaction
-            .execute(
-                "INSERT INTO schedules (id, scheduled_at, legacy_time)
-                 SELECT id, NULL, time FROM schedules_time_only",
-            )
-            .await?;
-        transaction
-            .execute("DROP TABLE schedules_time_only")
-            .await?;
-        return Ok(());
-    }
-
-    // 未知の形を無理に変換するとデータを失うため、必須列がなければ明示的に停止する。
-    if !has("scheduled_at") {
-        bail!("unsupported schedules table: scheduled_at column is missing");
-    }
-    if !has("legacy_time") {
-        transaction
-            .execute("ALTER TABLE schedules ADD COLUMN legacy_time TEXT")
-            .await?;
-    }
-    if !has("failure_reason") {
-        transaction
-            .execute("ALTER TABLE schedules ADD COLUMN failure_reason TEXT")
-            .await?;
-    }
-    Ok(())
-}
-
-/// 現行形式のスケジュールテーブルを新規作成する。
-async fn create_schedules_table(transaction: &mut Transaction<'_, Sqlite>) -> Result<()> {
+async fn create_schema(transaction: &mut Transaction<'_, Sqlite>) -> Result<()> {
     transaction
         .execute(
             "CREATE TABLE schedules (
                 id INTEGER PRIMARY KEY,
-                scheduled_at TEXT UNIQUE,
-                legacy_time TEXT,
+                scheduled_at TEXT NOT NULL UNIQUE,
                 failure_reason TEXT
             )",
         )
         .await?;
-    Ok(())
-}
-
-/// 単一行の状態・設定テーブルと追記型の履歴テーブルを不足時だけ作成する。
-async fn create_supporting_tables(transaction: &mut Transaction<'_, Sqlite>) -> Result<()> {
     transaction
         .execute(
-            "CREATE TABLE IF NOT EXISTS feeder_status (
+            "CREATE TABLE feeder_status (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
                 last_feed_at TEXT
             )",
         )
         .await?;
     transaction
-        .execute("INSERT OR IGNORE INTO feeder_status (id) VALUES (1)")
+        .execute("INSERT INTO feeder_status (id) VALUES (1)")
         .await?;
     transaction
         .execute(
-            "CREATE TABLE IF NOT EXISTS feed_history (
+            "CREATE TABLE feed_history (
                 id INTEGER PRIMARY KEY,
                 fed_at TEXT NOT NULL
             )",
@@ -127,7 +75,7 @@ async fn create_supporting_tables(transaction: &mut Transaction<'_, Sqlite>) -> 
         .await?;
     transaction
         .execute(
-            "CREATE TABLE IF NOT EXISTS settings (
+            "CREATE TABLE settings (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
                 cooldown_seconds INTEGER NOT NULL,
                 feed_duration_ms INTEGER NOT NULL
@@ -135,7 +83,7 @@ async fn create_supporting_tables(transaction: &mut Transaction<'_, Sqlite>) -> 
         )
         .await?;
     sqlx::query(
-        "INSERT OR IGNORE INTO settings (id, cooldown_seconds, feed_duration_ms)
+        "INSERT INTO settings (id, cooldown_seconds, feed_duration_ms)
          VALUES (1, ?1, ?2)",
     )
     .bind(DEFAULT_COOLDOWN_SECONDS as i64)
@@ -143,4 +91,47 @@ async fn create_supporting_tables(transaction: &mut Transaction<'_, Sqlite>) -> 
     .execute(&mut **transaction)
     .await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sqlx::sqlite::SqlitePoolOptions;
+
+    async fn pool() -> sqlx::SqlitePool {
+        SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn rejects_an_unversioned_existing_schema() {
+        let pool = pool().await;
+        sqlx::query("CREATE TABLE existing_data (id INTEGER PRIMARY KEY)")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        assert!(migrate(&pool).await.is_err());
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("PRAGMA user_version")
+                .fetch_one(&pool)
+                .await
+                .unwrap(),
+            0
+        );
+    }
+
+    #[tokio::test]
+    async fn rejects_a_newer_schema_version() {
+        let pool = pool().await;
+        sqlx::query("PRAGMA user_version = 2")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        assert!(migrate(&pool).await.is_err());
+    }
 }

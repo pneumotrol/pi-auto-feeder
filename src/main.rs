@@ -49,12 +49,8 @@ async fn main() -> color_eyre::Result<()> {
     Ok(())
 }
 
-/// 既存配置の `LEPTOS_SITE_ADDR` を移行期間中も受け入れ、Topcoat の `HOST` / `PORT`
-/// と同じループバック既定値を使う。
+/// `HOST` / `PORT` から待受アドレスを構築し、未指定時はループバックを使う。
 fn listen_address() -> color_eyre::Result<SocketAddr> {
-    if let Ok(address) = env::var("LEPTOS_SITE_ADDR") {
-        return Ok(address.parse()?);
-    }
     let host = env::var("HOST").unwrap_or_else(|_| "127.0.0.1".to_owned());
     let port = env::var("PORT").unwrap_or_else(|_| "3000".to_owned());
     Ok(format!("{host}:{port}").parse()?)
@@ -66,10 +62,7 @@ mod tests {
 
     #[test]
     fn default_listen_address_is_loopback() {
-        if env::var_os("LEPTOS_SITE_ADDR").is_none()
-            && env::var_os("HOST").is_none()
-            && env::var_os("PORT").is_none()
-        {
+        if env::var_os("HOST").is_none() && env::var_os("PORT").is_none() {
             assert_eq!(listen_address().unwrap(), "127.0.0.1:3000".parse().unwrap());
         }
     }

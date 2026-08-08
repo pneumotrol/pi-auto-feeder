@@ -23,10 +23,8 @@ pub const MAX_FEED_DURATION_MS: u64 = 10_000;
 pub struct Schedule {
     /// 行を一意に識別する ID。
     pub id: i64,
-    /// サーバのローカル日時。旧形式の行では `None`。
-    pub scheduled_at: Option<String>,
-    /// 日付を持たない旧スキーマの時刻。自動実行には使用しない。
-    pub legacy_time: Option<String>,
+    /// サーバのローカル日時。
+    pub scheduled_at: String,
     /// 未実行のまま予定日時を過ぎたか。
     pub missed: bool,
     /// 実行を開始したものの成功完了しなかった理由。
