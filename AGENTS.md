@@ -15,10 +15,10 @@
 
 ## アーキテクチャ
 
-- Raspberry Pi 上で Axum サーバを動作させる．
-- Web UI は Leptos 0.8 を利用し，SSR とハイドレーションを単一の `App` から構成する．
-- データの取得と更新には Leptos の server functions を利用する．初回表示はサーバサイドレンダリングし，ハイドレーション後は `Resource`，`ServerAction`，`ActionForm` などの標準機能で非同期に操作する．
-- サーバ側の状態変化は Server-Sent Events（SSE）で開いているトップ画面へ通知する．SSE は変更通知のみを送り，通知を受けたクライアントは server function から最新状態を再取得する．
+- Raspberry Pi 上で Topcoat 0.5 サーバを動作させる．
+- Web UI は Topcoat の `view!` とサーバサイドレンダリングで構成する．Wasm やクライアントビルドは使用しない．
+- データの取得は Topcoat の page handler からサービスへ直接委譲し，更新は `Form<T>` を受け取る POST route で行う．htmx による部分更新と通常の HTML フォームによるフォールバックを同じ route で提供する．
+- サーバ側の状態変化は Topcoat の Server-Sent Events（SSE）で開いているトップ画面へ通知する．SSE は変更通知のみを送り，通知を受けたクライアントは page handler から最新状態を再取得する．
 - GPIO 制御は Rust から行う．
 - カメラ映像は Axum の専用ルートから配信し，実機では `ffmpeg` と `/dev/video0` を利用する．
 - スケジュール給餌は Raspberry Pi 単体で動作し，外部サービスに依存しない．
@@ -32,21 +32,21 @@
 
 ### モジュール構成
 
-- `src/main.rs`: 設定と各サービスの初期化，Axum ルータと Leptos ルートの結合，スケジューラおよびサーバの起動を行う．
-- `src/app.rs`，`src/app/`: Leptos のルート，コンポーネント，server functions，共有する表示用データ型，ハイドレーション後の SSE 同期を責務別に提供する．
+- `src/main.rs`: 設定と各サービスの初期化，Topcoat ルータの構築，スケジューラおよびサーバの起動を行う．
+- `src/app.rs`，`src/app/`: Topcoat の page・layout・route・component，htmx フォーム，ブラウザ側の SSE 同期，CSS を提供する．
 - `src/feed.rs`: サーボモータ，モック動作，排他制御，クールタイムを含む共通給餌処理を管理する．
-- `src/camera.rs`: カメラ映像の配信，ルート定義，モック動作を管理する．
-- `src/events.rs`: 状態変更を通知する SSE ルートを提供する．
+- `src/camera.rs`: Topcoat からのカメラ映像配信とモック動作を管理する．
+- `src/events.rs`: Topcoat の SSE response で状態変更通知を提供する．
 - `src/schedule.rs`，`src/schedule/`: SQLite の初期化と旧スキーマの移行，スケジュール・設定・給餌履歴の永続化，日時検証，スケジューラを責務別に管理する．
-- `src/lib.rs`: feature に応じたモジュール公開と Leptos のハイドレーションエントリポイントを提供する．
-- `style/main.scss`: Web UI のスタイルを提供する．
+- `src/lib.rs`: Topcoat の Web 層とサーバ側サービスのモジュールを公開する．
+- `src/app/style.css`，`src/app/client.js`: Web UI のスタイルと SSE・時計同期を提供する．
 
 ## 主要技術
 
 - Raspberry Pi 4
 - Rust
-- Axum
-- Leptos
+- Topcoat 0.5
+- htmx
 - Tokio
 - SQLite / SQLx
 - Tailscale
@@ -59,7 +59,7 @@
 - 外部サービスへの依存は必要最小限とする．
 - シンプルさを優先し，過度な抽象化や将来の拡張を見越した設計は避ける（YAGNI を意識する）．
 - 既存の設計との一貫性を保つことを優先する．
-- UI，ルーティング，フォーム，非同期処理，状態管理，SSR，ハイドレーションには Leptos の標準的な実装を最優先する．独自の仕組みは，Leptos の標準機能では要件を満たせない場合に限る．
+- UI，ルーティング，フォーム，SSR，SSE には Topcoat の標準的な実装を最優先する．独自のブラウザ処理は SSE の再取得と表示時計の補間に限定する．
 - 給餌という物理操作の安全性を優先し，手動給餌とスケジュール給餌の排他制御，クールタイム，成功後の履歴記録を一つのサービスに集約する．
 - SQLite の既存データを失わないことを重視し，スキーマ変更は後方互換性のある明示的な移行として実装する．
 
@@ -74,12 +74,12 @@
 
 ## Web UI
 
-- UI は Leptos のコンポーネントとして実装し，Leptos 公式ドキュメントおよび同じメジャーバージョンの標準的なパターンを優先する．
-- データ取得には server functions と `Resource` / `Suspense`，更新には server functions と `ActionForm` / `ServerAction`，画面遷移には `leptos_router` を優先する．同じ通信処理を独自 API と server function の双方に重複実装しない．
-- ブラウザ固有 API や JavaScript を直接扱うのは，SSE など Leptos の標準機能だけでは実現できない処理に限定し，`#[cfg(feature = "hydrate")]` でサーバビルドから分離する．
-- サーバを正とし，クライアント側の状態は server function の結果または SSE 通知後の再取得によって同期する．楽観的更新を行う場合も，失敗時にサーバ状態へ戻せるようにする．
-- 手動給餌とスケジュールの追加・削除は，ハイドレーション後にページを再読み込みせず反映する．
-- JavaScript または Wasm が利用できない場合も操作できるよう，`ActionForm` による通常の HTML フォームのフォールバックを維持する．
+- UI は Topcoat の page・layout・component と `view!` で実装し，同じバージョンの公式パターンを優先する．
+- データ取得は page handler，更新は POST route と `Form<T>`，画面遷移は通常のリンクを優先する．同じ更新処理を複数の API に重複実装しない．
+- ブラウザ固有 API や JavaScript を直接扱うのは，SSE 通知後の再取得と画面上の時刻・クールタイム補間に限定する．
+- サーバを正とし，クライアント側の状態は Topcoat の SSR 結果または SSE 通知後の再取得によって同期する．
+- 手動給餌とスケジュールの追加・削除は，htmx 利用時にページを再読み込みせず反映する．
+- JavaScript が利用できない場合も操作できるよう，POST 後の 303 redirect を含む通常の HTML フォームのフォールバックを維持する．
 - サーバ時刻，最終給餌時刻，クールタイム，スケジュールの変化は SSE 経由で自動反映する．
 - 非同期処理には処理中・成功・失敗の状態を表示し，二重送信を防止する．主要な状態通知には `aria-live` などを用い，キーボード操作と支援技術を妨げない HTML を維持する．
 
@@ -96,7 +96,7 @@
 - Web サーバは Tailscale ネットワーク内からのみアクセス可能とする．
 - インターネットへ直接公開する構成は採用しない．
 - ユーザの追加・削除は Tailscale により管理する．
-- 既定ではループバックアドレスだけで待ち受け，Tailscale Serve 経由で公開する．直接待ち受ける場合は `LEPTOS_SITE_ADDR` に端末の Tailscale IP を明示する．
+- 既定ではループバックアドレスだけで待ち受け，Tailscale Serve 経由で公開する．直接待ち受ける場合は `HOST` と `PORT` を明示する．旧配置との互換性のため `LEPTOS_SITE_ADDR` も受け入れる．
 - 状態を変更する HTTP リクエストは同一オリジンに限定する．
 
 ## 依存ライブラリ
@@ -110,14 +110,15 @@
 
 ```sh
 cargo fmt
-leptosfmt src/**/*.rs
+topcoat fmt
 cargo clippy --all-targets -- -D warnings
 cargo test
-cargo leptos build
+cargo build --release
+topcoat asset bundle --release
 ```
 
 - DB スキーマ，スケジューラ，クールタイム，給餌処理を変更した場合は，正常系だけでなく，期限切れ，重複，失敗，旧 DB からの移行をテストする．
-- UI または server functions を変更した場合は，SSR，ハイドレーション後の操作，SSE 再同期，JavaScript 無効時のフォーム送信を確認する．
+- UI または route を変更した場合は，SSR，htmx 操作，SSE 再同期，JavaScript 無効時のフォーム送信を確認する．
 - リリース前にはモックで一連の操作を確認した後，実機上で GPIO，カメラ，タイムゾーン，サービス再起動後の DB 継続性を確認する．
 
 ## メンテナンスポリシー

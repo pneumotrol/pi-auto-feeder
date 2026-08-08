@@ -10,10 +10,11 @@
 ## ビルドと配置
 
 ```sh
-cargo leptos build --release
+cargo build --release
+topcoat asset bundle --release
 sudo install -m 0755 target/release/pi-auto-feeder /usr/local/bin/pi-auto-feeder
-sudo install -d /usr/local/share/pi-auto-feeder/site
-sudo cp -a target/site/. /usr/local/share/pi-auto-feeder/site/
+sudo install -d /usr/local/bin/assets
+sudo cp -a target/assets/. /usr/local/bin/assets/
 sudo install -m 0644 deploy/pi-auto-feeder.service /etc/systemd/system/pi-auto-feeder.service
 sudo install -d -o pi-auto-feeder -g pi-auto-feeder /var/lib/pi-auto-feeder
 ```
@@ -47,7 +48,7 @@ sudo systemctl start pi-auto-feeder
 
 ## リリース前確認
 
-1. `cargo fmt`，`leptosfmt src/**/*.rs`，`cargo clippy --all-targets -- -D warnings`，`cargo test`，`cargo leptos build --release` を実行する．
+1. `cargo fmt`，`topcoat fmt`，`cargo clippy --all-targets -- -D warnings`，`cargo test`，`cargo build --release`，`topcoat asset bundle --release` を実行する．
 2. モックモードでSSR，設定保存，手動給餌，スケジュール追加・削除，SSE更新を確認する．
 3. JavaScriptを無効にし，フォームから手動給餌，スケジュール操作，設定保存ができることを確認する．
 4. 実機でサーボの初期位置，駆動時間，クールタイム，カメラ映像を確認する．

@@ -3,74 +3,19 @@ name = "pi-auto-feeder"
 version = "0.1.0"
 edition = "2024"
 
-[lib]
-crate-type = ["cdylib", "rlib"]
-
 [[bin]]
 name = "pi-auto-feeder"
 path = "src/main.rs"
-required-features = ["ssr"]
-
-[features]
-default = ["ssr"]
-ssr = [
-    "dep:axum",
-    "dep:color-eyre",
-    "dep:futures-util",
-    "dep:rppal",
-    "dep:serde",
-    "dep:sqlx",
-    "dep:tokio",
-    "dep:tokio-util",
-    "dep:leptos_axum",
-    "leptos/ssr",
-    "leptos_meta/ssr",
-    "leptos_router/ssr",
-]
-hydrate = [
-    "dep:console_error_panic_hook",
-    "dep:serde",
-    "dep:wasm-bindgen",
-    "dep:web-sys",
-    "leptos/hydrate",
-]
 
 [dependencies]
-axum = { version = "0.8.9", optional = true }
 chrono = { version = "0.4.42", default-features = false, features = ["std"] }
-color-eyre = { version = "0.6.5", optional = true }
-console_error_panic_hook = { version = "0.1.7", optional = true }
-futures-util = { version = "0.3.32", optional = true }
-leptos = { version = "0.8.20", default-features = false }
-leptos_axum = { version = "0.8.0", optional = true }
-leptos_meta = { version = "0.8.0" }
-leptos_router = { version = "0.8.0" }
-rppal = { version = "0.22.1", optional = true }
-serde = { version = "1.0.228", features = ["derive"], optional = true }
-sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio", "sqlite"], optional = true }
-tokio = { version = "1.52.3", features = ["full"], optional = true }
-tokio-util = { version = "0.7.18", features = ["io", "rt"], optional = true }
-wasm-bindgen = { version = "0.2.116", optional = true }
-web-sys = { version = "0.3.103", features = ["Event", "EventSource", "Performance", "Window"], optional = true }
-
-[profile.wasm-release]
-inherits = "release"
-opt-level = "z"
-lto = true
-codegen-units = 1
-panic = "abort"
-
-[package.metadata.leptos]
-output-name = "pi-auto-feeder"
-site-root = "target/site"
-site-pkg-dir = "pkg"
-style-file = "style/main.scss"
-assets-dir = "public"
-site-addr = "127.0.0.1:3000"
-reload-port = 3001
-browserquery = "defaults"
-bin-features = ["ssr"]
-bin-default-features = false
-lib-features = ["hydrate"]
-lib-default-features = false
-lib-profile-release = "wasm-release"
+color-eyre = "0.6.5"
+futures-util = "0.3.32"
+http-body = "1.0.1"
+http-body-util = "0.1.3"
+rppal = "0.22.1"
+serde = { version = "1.0.228", features = ["derive"] }
+sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio", "sqlite"] }
+tokio = { version = "1.53.1", features = ["full"] }
+tokio-util = { version = "0.7.18", features = ["io", "rt"] }
+topcoat = { version = "0.5.0", features = ["htmx", "sse"] }

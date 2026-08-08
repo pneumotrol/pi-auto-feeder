@@ -1,0 +1,271 @@
+:root {
+  color-scheme: light;
+  font-family:
+    Inter,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+  color: #27272a;
+  background: #f4f4f5;
+  font-synthesis: none;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  background: linear-gradient(145deg, #fafafa 0%, #f4f4f5 45%, #e7e5e4 100%);
+}
+
+main {
+  width: min(1120px, calc(100% - 2rem));
+  margin: 0 auto;
+  padding: 2.5rem 0 4rem;
+}
+
+h1,
+h2,
+p {
+  margin-top: 0;
+}
+
+h1 {
+  margin-bottom: 0;
+  font-size: clamp(2rem, 6vw, 3.6rem);
+  letter-spacing: -0.055em;
+}
+
+h2 {
+  margin-bottom: 1.25rem;
+  font-size: 1.15rem;
+  letter-spacing: -0.02em;
+}
+
+.page-header,
+.section-heading,
+.form-row,
+.schedule-list > li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.page-header {
+  margin-bottom: 2rem;
+}
+
+.eyebrow {
+  margin-bottom: 0.35rem;
+  color: #71717a;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.card {
+  margin-bottom: 1rem;
+  padding: clamp(1.25rem, 3vw, 2rem);
+  border: 1px solid rgba(39, 39, 42, 0.08);
+  border-radius: 1.25rem;
+  background: rgba(255, 255, 255, 0.86);
+  box-shadow: 0 18px 50px rgba(39, 39, 42, 0.07);
+  backdrop-filter: blur(12px);
+}
+
+.camera-card img {
+  display: block;
+  width: 100%;
+  max-height: 560px;
+  border-radius: 0.85rem;
+  background: #18181b;
+  object-fit: contain;
+}
+
+.status-dot {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: #166534;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.status-dot::before {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 999px;
+  background: #22c55e;
+  content: "";
+  box-shadow: 0 0 0 0.25rem #dcfce7;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(260px, 0.75fr);
+  gap: 1rem;
+}
+
+.button {
+  display: inline-flex;
+  min-height: 2.75rem;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 0.75rem;
+  padding: 0.7rem 1rem;
+  font: inherit;
+  font-weight: 700;
+  text-decoration: none;
+  cursor: pointer;
+  transition:
+    transform 120ms ease,
+    opacity 120ms ease,
+    background 120ms ease;
+}
+
+.button:hover {
+  transform: translateY(-1px);
+}
+
+.button:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+
+.primary {
+  color: #fff;
+  background: #18181b;
+}
+
+.secondary {
+  color: #27272a;
+  background: #e4e4e7;
+}
+
+.danger {
+  min-height: 2.25rem;
+  padding: 0.45rem 0.75rem;
+  color: #991b1b;
+  background: #fee2e2;
+}
+
+.feed-button {
+  width: 100%;
+  min-height: 4rem;
+  font-size: 1.15rem;
+}
+
+.cooldown,
+.notice {
+  margin: 1rem 0 0;
+  color: #52525b;
+  text-align: center;
+}
+
+.notice {
+  margin: 0 0 1rem;
+  border: 1px solid #bae6fd;
+  border-radius: 0.75rem;
+  padding: 0.9rem 1rem;
+  color: #075985;
+  background: #f0f9ff;
+}
+
+.stacked-form {
+  display: grid;
+  gap: 0.65rem;
+}
+
+label,
+dt {
+  color: #52525b;
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+input {
+  width: 100%;
+  min-height: 2.75rem;
+  border: 1px solid #d4d4d8;
+  border-radius: 0.75rem;
+  padding: 0.6rem 0.8rem;
+  color: #18181b;
+  background: #fff;
+  font: inherit;
+}
+
+input:focus-visible,
+.button:focus-visible,
+a:focus-visible {
+  outline: 3px solid #7dd3fc;
+  outline-offset: 2px;
+}
+
+.schedule-list,
+.history-list {
+  margin: 0 0 1.5rem;
+  padding: 0;
+  list-style: none;
+}
+
+.schedule-list > li,
+.history-list > li {
+  border-bottom: 1px solid #e4e4e7;
+  padding: 0.9rem 0;
+}
+
+.schedule-list > li:first-child,
+.history-list > li:first-child {
+  padding-top: 0;
+}
+
+.error {
+  margin: 0.4rem 0 0;
+  color: #b91c1c;
+  font-size: 0.85rem;
+}
+
+.empty {
+  color: #71717a;
+}
+
+dl {
+  margin: 0;
+}
+
+dd {
+  margin: 0.25rem 0 1.25rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.settings-page {
+  max-width: 720px;
+}
+
+@media (max-width: 760px) {
+  main {
+    width: min(100% - 1rem, 1120px);
+    padding-top: 1.25rem;
+  }
+
+  .grid {
+    grid-template-columns: 1fr;
+  }
+
+  .page-header {
+    align-items: flex-end;
+  }
+
+  .form-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}

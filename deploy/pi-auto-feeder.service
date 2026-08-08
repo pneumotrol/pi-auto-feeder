@@ -12,8 +12,8 @@ SupplementaryGroups=gpio video
 WorkingDirectory=/var/lib/pi-auto-feeder
 EnvironmentFile=-/etc/pi-auto-feeder.env
 Environment=DATABASE_URL=sqlite:///var/lib/pi-auto-feeder/pi-auto-feeder.sqlite3
-Environment=LEPTOS_SITE_ADDR=127.0.0.1:3000
-Environment=LEPTOS_SITE_ROOT=/usr/local/share/pi-auto-feeder/site
+Environment=HOST=127.0.0.1
+Environment=PORT=3000
 ExecStart=/usr/local/bin/pi-auto-feeder
 Restart=on-failure
 RestartSec=5s
