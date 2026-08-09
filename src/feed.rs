@@ -14,7 +14,7 @@ use tokio::sync::Mutex;
 
 const PWM_PERIOD: Duration = Duration::from_millis(20);
 const NEUTRAL_PULSE_WIDTH_MICROS: u64 = 1_500;
-const MAX_FEED_PULSE_WIDTH_MICROS: u64 = 2_300;
+const FULL_SPEED_FEED_PULSE_WIDTH_MICROS: u64 = 700;
 
 #[derive(Clone)]
 /// 実機 PWM または開発用モックを選択してサーボを駆動する低レベルドライバ。
@@ -149,10 +149,10 @@ async fn feed_with_hardware_pwm(
     Ok(())
 }
 
-/// 給餌速度 1～100% を、停止位置から最大回転までのパルス幅へ線形変換する。
+/// 給餌速度 1～100% を、中立位置から給餌方向の最大回転までのパルス幅へ線形変換する。
 fn feed_pulse_width(speed_percent: u64) -> Duration {
-    let pulse_range = MAX_FEED_PULSE_WIDTH_MICROS - NEUTRAL_PULSE_WIDTH_MICROS;
-    Duration::from_micros(NEUTRAL_PULSE_WIDTH_MICROS + pulse_range * speed_percent / 100)
+    let pulse_range = NEUTRAL_PULSE_WIDTH_MICROS - FULL_SPEED_FEED_PULSE_WIDTH_MICROS;
+    Duration::from_micros(NEUTRAL_PULSE_WIDTH_MICROS - pulse_range * speed_percent / 100)
 }
 
 #[cfg(test)]
@@ -164,9 +164,9 @@ mod tests {
 
     #[test]
     fn maps_feed_speed_to_pulse_width() {
-        assert_eq!(feed_pulse_width(1), Duration::from_micros(1_508));
-        assert_eq!(feed_pulse_width(50), Duration::from_micros(1_900));
-        assert_eq!(feed_pulse_width(100), Duration::from_micros(2_300));
+        assert_eq!(feed_pulse_width(1), Duration::from_micros(1_492));
+        assert_eq!(feed_pulse_width(50), Duration::from_micros(1_100));
+        assert_eq!(feed_pulse_width(100), Duration::from_micros(700));
     }
 
     async fn service(backend: FeederBackend) -> (FeedService, String) {
