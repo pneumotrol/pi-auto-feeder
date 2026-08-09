@@ -1,6 +1,6 @@
 //! SQLite スキーマを初期化し、対応するバージョンだけを開く。
 
-use super::{DEFAULT_COOLDOWN_SECONDS, DEFAULT_FEED_DURATION_MS};
+use super::{DEFAULT_COOLDOWN_SECONDS, DEFAULT_FEED_DURATION_MS, DEFAULT_FEED_SPEED_PERCENT};
 use color_eyre::eyre::{Result, WrapErr, bail};
 use sqlx::{Executor, Sqlite, Transaction};
 
@@ -78,16 +78,18 @@ async fn create_schema(transaction: &mut Transaction<'_, Sqlite>) -> Result<()> 
             "CREATE TABLE settings (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
                 cooldown_seconds INTEGER NOT NULL,
-                feed_duration_ms INTEGER NOT NULL
+                feed_duration_ms INTEGER NOT NULL,
+                feed_speed_percent INTEGER NOT NULL
             )",
         )
         .await?;
     sqlx::query(
-        "INSERT INTO settings (id, cooldown_seconds, feed_duration_ms)
-         VALUES (1, ?1, ?2)",
+        "INSERT INTO settings (id, cooldown_seconds, feed_duration_ms, feed_speed_percent)
+         VALUES (1, ?1, ?2, ?3)",
     )
     .bind(DEFAULT_COOLDOWN_SECONDS as i64)
     .bind(DEFAULT_FEED_DURATION_MS as i64)
+    .bind(DEFAULT_FEED_SPEED_PERCENT as i64)
     .execute(&mut **transaction)
     .await?;
     Ok(())

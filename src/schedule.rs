@@ -9,14 +9,20 @@ pub use store::ScheduleStore;
 
 /// 新規データベースで使用するクールタイムの既定値（秒）。
 pub const DEFAULT_COOLDOWN_SECONDS: u64 = 300;
-/// 新規データベースで使用するサーボ駆動時間の既定値（ミリ秒）。
+/// 新規データベースで使用するサーボ回転時間の既定値（ミリ秒）。
 pub const DEFAULT_FEED_DURATION_MS: u64 = 1_000;
+/// 新規データベースで使用する給餌速度（パーセント）。
+pub const DEFAULT_FEED_SPEED_PERCENT: u64 = 100;
 /// 設定可能なクールタイムの上限（秒）。
 pub const MAX_COOLDOWN_SECONDS: u64 = 86_400;
-/// 設定可能なサーボ駆動時間の下限（ミリ秒）。
+/// 設定可能なサーボ回転時間の下限（ミリ秒）。
 pub const MIN_FEED_DURATION_MS: u64 = 100;
-/// 設定可能なサーボ駆動時間の上限（ミリ秒）。
+/// 設定可能なサーボ回転時間の上限（ミリ秒）。
 pub const MAX_FEED_DURATION_MS: u64 = 10_000;
+/// 設定可能な給餌速度の下限（パーセント）。
+pub const MIN_FEED_SPEED_PERCENT: u64 = 1;
+/// 設定可能な給餌速度の上限（パーセント）。
+pub const MAX_FEED_SPEED_PERCENT: u64 = 100;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 /// SQLite に保存された一回限りの給餌予定。
@@ -36,8 +42,10 @@ pub struct Schedule {
 pub struct Settings {
     /// 給餌成功後に次の給餌を抑止する秒数。
     pub cooldown_seconds: u64,
-    /// サーボを給餌位置に維持するミリ秒数。
+    /// サーボを給餌方向へ回転させるミリ秒数。
     pub feed_duration_ms: u64,
+    /// サーボを給餌方向へ回転させる速度（パーセント）。
+    pub feed_speed_percent: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

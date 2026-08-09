@@ -13,12 +13,10 @@ use std::{
 use tokio::sync::Mutex;
 
 const PWM_PERIOD: Duration = Duration::from_millis(20);
-const MIN_PULSE_WIDTH_MICROS: u64 = 500;
-const MAX_PULSE_WIDTH_MICROS: u64 = 2_500;
-const MAX_ANGLE_DEGREES: u64 = 180;
-const IDLE_ANGLE_DEGREES: u64 = 0;
-const FEED_ANGLE_DEGREES: u64 = 90;
-const POSITION_SETTLE_TIME: Duration = Duration::from_secs(1);
+const STOP_PULSE_WIDTH_MICROS: u64 = 1_500;
+const STOP_PULSE_WIDTH: Duration = Duration::from_micros(STOP_PULSE_WIDTH_MICROS);
+const MAX_FEED_PULSE_WIDTH_MICROS: u64 = 2_300;
+const STOP_SETTLE_TIME: Duration = Duration::from_secs(1);
 
 #[derive(Clone)]
 /// 実機 PWM または開発用モックを選択してサーボを駆動する低レベルドライバ。
@@ -69,7 +67,9 @@ impl FeedService {
             return Ok(FeedOutcome::Cooldown(remaining));
         }
         let settings = self.store.settings().await?;
-        self.feeder.feed(settings.feed_duration_ms).await?;
+        self.feeder
+            .feed(settings.feed_duration_ms, settings.feed_speed_percent)
+            .await?;
         // 物理操作後の記録失敗は再試行すると二重給餌になるため、文脈付きエラーとして返す。
         self.store
             .record_feed()
@@ -109,15 +109,19 @@ impl Feeder {
         }
     }
 
-    /// 選択済みのバックエンドで指定時間だけ給餌位置を維持する。
-    async fn feed(&self, duration_ms: u64) -> Result<()> {
+    /// 選択済みのバックエンドで指定速度・時間だけ給餌方向へ回転する。
+    async fn feed(&self, duration_ms: u64, speed_percent: u64) -> Result<()> {
         match self.backend {
             FeederBackend::Mock => {
-                println!("Feed requested for {duration_ms} ms (mock)");
+                println!("Feed requested at {speed_percent}% for {duration_ms} ms (mock)");
                 Ok(())
             }
             FeederBackend::Hardware => {
-                feed_with_hardware_pwm(Duration::from_millis(duration_ms)).await?;
+                feed_with_hardware_pwm(
+                    Duration::from_millis(duration_ms),
+                    feed_pulse_width(speed_percent),
+                )
+                .await?;
                 Ok(())
             }
             #[cfg(test)]
@@ -126,32 +130,34 @@ impl Feeder {
     }
 }
 
-async fn feed_with_hardware_pwm(feed_duration: Duration) -> rppal::pwm::Result<()> {
+async fn feed_with_hardware_pwm(
+    feed_duration: Duration,
+    feed_pulse_width: Duration,
+) -> rppal::pwm::Result<()> {
     // Raspberry Pi 4B maps PWM0 to BCM GPIO12 or GPIO18, and PWM1 to GPIO13 or GPIO19.
     // This application uses PWM0 on BCM GPIO18 (physical pin 12).
     let pwm = Pwm::with_period(
         Channel::Pwm0,
         PWM_PERIOD,
-        pulse_width(IDLE_ANGLE_DEGREES),
+        STOP_PULSE_WIDTH,
         Polarity::Normal,
         true,
     )?;
 
-    // 起動直後と復帰直後に静止時間を設け、サーボが目標位置へ達するのを待つ。
-    tokio::time::sleep(POSITION_SETTLE_TIME).await;
-    pwm.set_pulse_width(pulse_width(FEED_ANGLE_DEGREES))?;
+    // 停止信号を安定させてから、指定時間だけ給餌方向へ回転させる。
+    tokio::time::sleep(STOP_SETTLE_TIME).await;
+    pwm.set_pulse_width(feed_pulse_width)?;
     tokio::time::sleep(feed_duration).await;
-    pwm.set_pulse_width(pulse_width(IDLE_ANGLE_DEGREES))?;
-    tokio::time::sleep(POSITION_SETTLE_TIME).await;
+    pwm.set_pulse_width(STOP_PULSE_WIDTH)?;
+    tokio::time::sleep(STOP_SETTLE_TIME).await;
 
     Ok(())
 }
 
-/// 0～180 度の角度をサーボ用の 0.5～2.5 ms パルス幅へ線形変換する。
-fn pulse_width(angle_degrees: u64) -> Duration {
-    let pulse_range = MAX_PULSE_WIDTH_MICROS - MIN_PULSE_WIDTH_MICROS;
-    let micros = MIN_PULSE_WIDTH_MICROS + pulse_range * angle_degrees / MAX_ANGLE_DEGREES;
-    Duration::from_micros(micros)
+/// 給餌速度 1～100% を、停止位置から最大回転までのパルス幅へ線形変換する。
+fn feed_pulse_width(speed_percent: u64) -> Duration {
+    let pulse_range = MAX_FEED_PULSE_WIDTH_MICROS - STOP_PULSE_WIDTH_MICROS;
+    Duration::from_micros(STOP_PULSE_WIDTH_MICROS + pulse_range * speed_percent / 100)
 }
 
 #[cfg(test)]
@@ -160,6 +166,13 @@ mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
 
     static NEXT_DATABASE_ID: AtomicU64 = AtomicU64::new(0);
+
+    #[test]
+    fn maps_feed_speed_to_pulse_width() {
+        assert_eq!(feed_pulse_width(1), Duration::from_micros(1_508));
+        assert_eq!(feed_pulse_width(50), Duration::from_micros(1_900));
+        assert_eq!(feed_pulse_width(100), Duration::from_micros(2_300));
+    }
 
     async fn service(backend: FeederBackend) -> (FeedService, String) {
         let id = NEXT_DATABASE_ID.fetch_add(1, Ordering::Relaxed);

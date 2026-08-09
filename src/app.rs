@@ -3,8 +3,8 @@
 use crate::{
     feed::{FeedOutcome, FeedService},
     schedule::{
-        MAX_COOLDOWN_SECONDS, MAX_FEED_DURATION_MS, MIN_FEED_DURATION_MS, Schedule, ScheduleStore,
-        Settings,
+        MAX_COOLDOWN_SECONDS, MAX_FEED_DURATION_MS, MAX_FEED_SPEED_PERCENT, MIN_FEED_DURATION_MS,
+        MIN_FEED_SPEED_PERCENT, Schedule, ScheduleStore, Settings,
     },
 };
 use serde::Deserialize;
@@ -281,7 +281,7 @@ async fn settings_page(cx: &Cx) -> Result {
                         required="required"
                     >
                     <label for="feed-duration-ms">
-                        "一回の給餌量・サーボ駆動時間（ミリ秒）"
+                        "サーボ回転時間（ミリ秒）"
                     </label>
                     <input
                         id="feed-duration-ms"
@@ -290,6 +290,16 @@ async fn settings_page(cx: &Cx) -> Result {
                         min=(MIN_FEED_DURATION_MS.to_string())
                         max=(MAX_FEED_DURATION_MS.to_string())
                         value=(settings.feed_duration_ms.to_string())
+                        required="required"
+                    >
+                    <label for="feed-speed-percent">"給餌速度（%）"</label>
+                    <input
+                        id="feed-speed-percent"
+                        name="feed_speed_percent"
+                        type="number"
+                        min=(MIN_FEED_SPEED_PERCENT.to_string())
+                        max=(MAX_FEED_SPEED_PERCENT.to_string())
+                        value=(settings.feed_speed_percent.to_string())
                         required="required"
                     >
                     <button class="button primary" type="submit">"保存"</button>
@@ -313,6 +323,7 @@ struct DeleteSchedule {
 struct SaveSettings {
     cooldown_seconds: u64,
     feed_duration_ms: u64,
+    feed_speed_percent: u64,
 }
 
 #[route(POST "/feed")]
@@ -359,6 +370,7 @@ async fn save_settings(cx: &Cx, Form(input): Form<SaveSettings>) -> Result<Respo
     let feed_settings = Settings {
         cooldown_seconds: input.cooldown_seconds,
         feed_duration_ms: input.feed_duration_ms,
+        feed_speed_percent: input.feed_speed_percent,
     };
     let location = match store(cx).update_settings(&feed_settings).await {
         Ok(()) => "/settings?notice=saved",

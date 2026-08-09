@@ -1,8 +1,8 @@
 //! SQLite を正とするスケジュール・設定・給餌履歴ストア。
 
 use super::{
-    MAX_COOLDOWN_SECONDS, MAX_FEED_DURATION_MS, MIN_FEED_DURATION_MS, Schedule, ServerStatus,
-    Settings, migration,
+    MAX_COOLDOWN_SECONDS, MAX_FEED_DURATION_MS, MAX_FEED_SPEED_PERCENT, MIN_FEED_DURATION_MS,
+    MIN_FEED_SPEED_PERCENT, Schedule, ServerStatus, Settings, migration,
 };
 use chrono::NaiveDateTime;
 use color_eyre::eyre::{Result, WrapErr, bail};
@@ -136,17 +136,23 @@ impl ScheduleStore {
 
     /// 保存値を符号なし整数へ変換し、許容範囲を再検証して返す。
     pub async fn settings(&self) -> Result<Settings> {
-        let (cooldown_seconds, feed_duration_ms): (i64, i64) =
-            sqlx::query_as("SELECT cooldown_seconds, feed_duration_ms FROM settings WHERE id = 1")
-                .fetch_one(&self.pool)
-                .await?;
+        let (cooldown_seconds, feed_duration_ms, feed_speed_percent): (i64, i64, i64) =
+            sqlx::query_as(
+                "SELECT cooldown_seconds, feed_duration_ms, feed_speed_percent
+                 FROM settings WHERE id = 1",
+            )
+            .fetch_one(&self.pool)
+            .await?;
         let cooldown_seconds = u64::try_from(cooldown_seconds)
             .wrap_err("stored cooldown_seconds must not be negative")?;
         let feed_duration_ms = u64::try_from(feed_duration_ms)
             .wrap_err("stored feed_duration_ms must not be negative")?;
+        let feed_speed_percent = u64::try_from(feed_speed_percent)
+            .wrap_err("stored feed_speed_percent must not be negative")?;
         let settings = Settings {
             cooldown_seconds,
             feed_duration_ms,
+            feed_speed_percent,
         };
         validate_settings(&settings)?;
         Ok(settings)
@@ -157,11 +163,15 @@ impl ScheduleStore {
         validate_settings(settings)?;
         let cooldown_seconds = settings.cooldown_seconds as i64;
         let feed_duration_ms = settings.feed_duration_ms as i64;
+        let feed_speed_percent = settings.feed_speed_percent as i64;
         sqlx::query(
-            "UPDATE settings SET cooldown_seconds = ?1, feed_duration_ms = ?2 WHERE id = 1",
+            "UPDATE settings
+             SET cooldown_seconds = ?1, feed_duration_ms = ?2, feed_speed_percent = ?3
+             WHERE id = 1",
         )
         .bind(cooldown_seconds)
         .bind(feed_duration_ms)
+        .bind(feed_speed_percent)
         .execute(&self.pool)
         .await?;
         self.notify();
@@ -273,6 +283,7 @@ fn validate_scheduled_at(value: &str) -> Result<()> {
 fn validate_settings(settings: &Settings) -> Result<()> {
     if settings.cooldown_seconds > MAX_COOLDOWN_SECONDS
         || !(MIN_FEED_DURATION_MS..=MAX_FEED_DURATION_MS).contains(&settings.feed_duration_ms)
+        || !(MIN_FEED_SPEED_PERCENT..=MAX_FEED_SPEED_PERCENT).contains(&settings.feed_speed_percent)
     {
         bail!("settings are outside the allowed range");
     }
@@ -282,7 +293,9 @@ fn validate_settings(settings: &Settings) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::schedule::{DEFAULT_COOLDOWN_SECONDS, DEFAULT_FEED_DURATION_MS};
+    use crate::schedule::{
+        DEFAULT_COOLDOWN_SECONDS, DEFAULT_FEED_DURATION_MS, DEFAULT_FEED_SPEED_PERCENT,
+    };
     use std::sync::atomic::{AtomicU64, Ordering};
 
     static NEXT_DATABASE_ID: AtomicU64 = AtomicU64::new(0);
@@ -315,6 +328,7 @@ mod tests {
             Settings {
                 cooldown_seconds: DEFAULT_COOLDOWN_SECONDS,
                 feed_duration_ms: DEFAULT_FEED_DURATION_MS,
+                feed_speed_percent: DEFAULT_FEED_SPEED_PERCENT,
             }
         );
 
@@ -336,10 +350,38 @@ mod tests {
                 .update_settings(&Settings {
                     cooldown_seconds: MAX_COOLDOWN_SECONDS + 1,
                     feed_duration_ms: DEFAULT_FEED_DURATION_MS,
+                    feed_speed_percent: DEFAULT_FEED_SPEED_PERCENT,
                 })
                 .await
                 .is_err()
         );
+        assert!(
+            store
+                .update_settings(&Settings {
+                    cooldown_seconds: DEFAULT_COOLDOWN_SECONDS,
+                    feed_duration_ms: DEFAULT_FEED_DURATION_MS,
+                    feed_speed_percent: MAX_FEED_SPEED_PERCENT + 1,
+                })
+                .await
+                .is_err()
+        );
+        assert!(
+            store
+                .update_settings(&Settings {
+                    cooldown_seconds: DEFAULT_COOLDOWN_SECONDS,
+                    feed_duration_ms: DEFAULT_FEED_DURATION_MS,
+                    feed_speed_percent: 0,
+                })
+                .await
+                .is_err()
+        );
+        let updated = Settings {
+            cooldown_seconds: 60,
+            feed_duration_ms: 500,
+            feed_speed_percent: 50,
+        };
+        store.update_settings(&updated).await.unwrap();
+        assert_eq!(store.settings().await.unwrap(), updated);
 
         store.pool.close().await;
         tokio::fs::remove_file(path).await.unwrap();

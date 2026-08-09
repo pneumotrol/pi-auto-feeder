@@ -105,19 +105,19 @@ Tailscale Serve は HTTPS を終端し、ループバックのポート 3000 へ
 - 新規 DB には `schedules`、`feeder_status`、`feed_history`、`settings` を作成する．
 - `schedules.scheduled_at` は `NOT NULL UNIQUE` とし、日時未設定や重複を許可しない．
 - schema version 1 の DB は変更せず開く．
-- version 0 の既存スキーマや、実装より新しい schema version は自動変換せず起動エラーにする．
+- version 0 の既存スキーマや、version 1 より新しい schema version は変更せず起動エラーにする．
 
 初回起動後にログと画面を確認し、DB の初期化に失敗していないことを確認する．
 
 ## リリース後確認
 
-1. `systemctl status pi-auto-feeder` と `journalctl -u pi-auto-feeder -b` に起動、DB 移行、資産読込、GPIO、`ffmpeg` のエラーがないことを確認する．
+1. `systemctl status pi-auto-feeder` と `journalctl -u pi-auto-feeder -b` に起動、DB 初期化・検査、資産読込、GPIO、`ffmpeg` のエラーがないことを確認する．
 2. Tailscale Serve の URL が tailnet 外から直接公開されていないことを確認する．Funnel は有効にしない．
 3. トップ画面と設定画面が SSR され、CSS とクライアントスクリプトが読み込まれることを確認する．
 4. JavaScript 有効時に、手動給餌、予定追加・削除、設定保存がページ全体の再読込なしで反映されることを確認する．
 5. JavaScript を無効にし、同じフォーム操作が 303 redirect で完了することを確認する．
 6. 別ブラウザでトップ画面を開き、給餌・予定・設定の変更後に SSE で再取得されることを確認する．
-7. 実機で待機位置 0 度、給餌位置 90 度、設定した駆動時間、前後各 1 秒の静止、クールタイムを確認する．
+7. 実機で連続回転サーボが 1,500 µs で停止し、給餌速度 1～100% に応じた 1,508～2,300 µs で設定した時間だけ給餌方向へ回転すること、回転前後各 1 秒の停止、クールタイムを確認する．
 8. 同時に給餌要求を送り、mutex とクールタイムにより二重駆動しないことを確認する．
 9. `/camera/stream` が `/dev/video0` の MJPEG を継続表示し、ブラウザ切断後に対応する `ffmpeg` が残らないことを確認する．
 10. 未来の予定が指定した分に 1 回だけ実行され、成功後に削除されることを確認する．クールタイム中・結果不明・期限切れの予定は再実行されず理由付きで残ることも確認する．
@@ -129,8 +129,7 @@ Tailscale Serve は HTTPS を終端し、ループバックのポート 3000 へ
 
 1. サービスを停止する．
 2. 直前のバイナリと、それに対応する `/usr/local/bin/assets` を同じリリースの組として戻す．
-3. 新バージョンが DB を移行済みの場合、旧バイナリが schema version 1 を扱えると確認できない限り、退避した DB も復元する．
-4. DB 復元時は `pi-auto-feeder.sqlite3-wal` と `pi-auto-feeder.sqlite3-shm` が残っていないことを確認してから、バックアップを正規ファイル名へ戻し、所有者を `pi-auto-feeder` にする．
-5. `systemctl daemon-reload` 後に起動し、リリース後確認を繰り返す．
+3. DB を復元する場合は、`pi-auto-feeder.sqlite3-wal` と `pi-auto-feeder.sqlite3-shm` が残っていないことを確認してから、バックアップを正規ファイル名へ戻し、所有者を `pi-auto-feeder` にする．
+4. `systemctl daemon-reload` 後に起動し、リリース後確認を繰り返す．
 
 DB や assets の上書きは復旧不能になり得るため、バックアップの `integrity_check` と対象パスを確認してから実施する．
