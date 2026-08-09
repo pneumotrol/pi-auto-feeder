@@ -13,10 +13,8 @@ use std::{
 use tokio::sync::Mutex;
 
 const PWM_PERIOD: Duration = Duration::from_millis(20);
-const STOP_PULSE_WIDTH_MICROS: u64 = 1_500;
-const STOP_PULSE_WIDTH: Duration = Duration::from_micros(STOP_PULSE_WIDTH_MICROS);
+const NEUTRAL_PULSE_WIDTH_MICROS: u64 = 1_500;
 const MAX_FEED_PULSE_WIDTH_MICROS: u64 = 2_300;
-const STOP_SETTLE_TIME: Duration = Duration::from_secs(1);
 
 #[derive(Clone)]
 /// 実機 PWM または開発用モックを選択してサーボを駆動する低レベルドライバ。
@@ -139,25 +137,22 @@ async fn feed_with_hardware_pwm(
     let pwm = Pwm::with_period(
         Channel::Pwm0,
         PWM_PERIOD,
-        STOP_PULSE_WIDTH,
+        feed_pulse_width,
         Polarity::Normal,
         true,
     )?;
 
-    // 停止信号を安定させてから、指定時間だけ給餌方向へ回転させる。
-    tokio::time::sleep(STOP_SETTLE_TIME).await;
-    pwm.set_pulse_width(feed_pulse_width)?;
+    // 最初のパルスから設定速度で回転させ、指定時間後に信号を停止する。
     tokio::time::sleep(feed_duration).await;
-    pwm.set_pulse_width(STOP_PULSE_WIDTH)?;
-    tokio::time::sleep(STOP_SETTLE_TIME).await;
+    pwm.disable()?;
 
     Ok(())
 }
 
 /// 給餌速度 1～100% を、停止位置から最大回転までのパルス幅へ線形変換する。
 fn feed_pulse_width(speed_percent: u64) -> Duration {
-    let pulse_range = MAX_FEED_PULSE_WIDTH_MICROS - STOP_PULSE_WIDTH_MICROS;
-    Duration::from_micros(STOP_PULSE_WIDTH_MICROS + pulse_range * speed_percent / 100)
+    let pulse_range = MAX_FEED_PULSE_WIDTH_MICROS - NEUTRAL_PULSE_WIDTH_MICROS;
+    Duration::from_micros(NEUTRAL_PULSE_WIDTH_MICROS + pulse_range * speed_percent / 100)
 }
 
 #[cfg(test)]
